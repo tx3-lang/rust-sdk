@@ -1,5 +1,5 @@
 [package]
-name = "tx3-trp"
+name = "tx3-sdk"
 version = "0.1.0"
 edition = "2024"
 
