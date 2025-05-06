@@ -150,6 +150,14 @@ fn flatten_json_values(value: Value) -> Value {
                     return Value::String(s.clone());
                 }
             }
+
+            // Check if this is an ArgValue pattern (e.g., {"Int": "value"})
+            if map.len() == 1 && map.contains_key("Int") {
+                // Extract the inner value
+                if let Some(Value::Number(s)) = map.get("Int") {
+                    return Value::Number(s.clone());
+                }
+            }
             
             // Process each field in the object
             let mut new_map = Map::new();
