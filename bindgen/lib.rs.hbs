@@ -64,7 +64,7 @@ impl Client {
         let tir_info = TirInfo {
             bytecode: {{constantCase constant_name}}.to_string(),
             encoding: "hex".to_string(),
-            version: "v1alpha1".to_string(),
+            version: "{{ir_version}}".to_string(),
         };
         
         self.client.resolve(ProtoTxRequest {
