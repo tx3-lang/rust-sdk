@@ -25,8 +25,19 @@ pub const {{constantCase constant_name}}: &str = "{{ir_bytes}}";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct {{pascalCase params_name}} {
 {{#each parameters}}
-    pub {{snakeCase name}}: {{{type_name}}},
+    pub {{snakeCase name}}: tx3_lang::ArgValue,
 {{/each}}
+}
+impl {{pascalCase params_name}} {
+    fn to_map(&self) -> HashMap<String, tx3_lang::ArgValue> {
+        let mut map = HashMap::new();
+
+        {{#each parameters}}
+           map.insert("{{snakeCase name}}".to_string(), self.{{snakeCase name}}.clone());
+        {{/each}}
+
+        map
+    }
 }
 
 {{/each}}
@@ -66,10 +77,10 @@ impl Client {
             encoding: "hex".to_string(),
             version: "{{ir_version}}".to_string(),
         };
-        
+
         self.client.resolve(ProtoTxRequest {
             tir: tir_info,
-            args: serde_json::to_value(&args).unwrap(),
+            args: args.to_map(),
         }).await
     }
 {{/each}}

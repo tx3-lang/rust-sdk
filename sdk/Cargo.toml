@@ -10,6 +10,7 @@ serde_json = "1.0"
 tx3-lang = { git = "https://github.com/tx3-lang/tx3" } 
 uuid = { version = "1.16.0", features = ["v4"] }
 thiserror = "2.0.12"
+hex = "0.4.3"
 
 [lib]
 path = "src/lib.rs"

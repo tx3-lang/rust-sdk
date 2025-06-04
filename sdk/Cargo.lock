@@ -1413,6 +1413,7 @@ dependencies = [
 name = "tx3-sdk"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "reqwest",
  "serde",
  "serde_json",
