@@ -63,7 +63,7 @@ pub struct Client {
 
 pub struct ProtoTxRequest {
     pub tir: TirInfo,
-    pub args: serde_json::Value,
+    pub args: HashMap<String, tx3_lang::ArgValue>,
 }
 
 impl Client {
@@ -98,7 +98,7 @@ impl Client {
             "method": "trp.resolve",
             "params": {
                 "tir": proto_tx.tir,
-                "args": flatten_json_values(proto_tx.args),
+                "args": handle_arg_values(&proto_tx.args),
                 "env": self.options.env_args,
             },
             "id": Uuid::new_v4().to_string(),
@@ -145,39 +145,32 @@ impl Client {
     }
 }
 
-/// Recursively flattens nested JSON objects containing ArgValue patterns
-fn flatten_json_values(value: Value) -> Value {
-    match value {
-        Value::Object(map) => {
-            // Check if this is an ArgValue pattern (e.g., {"String": "value"})
-            if map.len() == 1 && map.contains_key("String") {
-                // Extract the inner value
-                if let Some(Value::String(s)) = map.get("String") {
-                    return Value::String(s.clone());
-                }
-            }
+fn handle_arg_values(args: &HashMap<String, ArgValue>) -> Map<String, Value> {
+    let mut map = Map::new();
 
-            // Check if this is an ArgValue pattern (e.g., {"Int": "value"})
-            if map.len() == 1 && map.contains_key("Int") {
-                // Extract the inner value
-                if let Some(Value::Number(s)) = map.get("Int") {
-                    return Value::Number(s.clone());
-                }
+    for (key, value) in args {
+        match value {
+            ArgValue::Int(i) => {
+                // TODO: map error for bigger numbers
+                map.insert(key.clone(), Value::Number((*i as i64).into()));
             }
-
-            // Process each field in the object
-            let mut new_map = Map::new();
-            for (key, val) in map {
-                new_map.insert(key, flatten_json_values(val));
+            ArgValue::Bool(b) => {
+                map.insert(key.clone(), Value::Bool(*b));
             }
-            Value::Object(new_map)
+            ArgValue::String(s) => {
+                map.insert(key.clone(), Value::String(s.clone()));
+            }
+            ArgValue::Bytes(b) => {
+                map.insert(key.clone(), Value::String(format!("0x{}", hex::encode(b))));
+            }
+            ArgValue::Address(a) => {
+                map.insert(key.clone(), Value::String(hex::encode(a)));
+            }
+            _ => {
+                unimplemented!("{}", key);
+            }
         }
-        Value::Array(arr) => {
-            // Process each element in the array
-            Value::Array(arr.into_iter().map(flatten_json_values).collect())
-        }
-        // Return other value types as is
-        _ => value,
     }
-}
 
+    map
+}
