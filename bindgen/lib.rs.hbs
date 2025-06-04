@@ -25,7 +25,7 @@ pub const {{constantCase constant_name}}: &str = "{{ir_bytes}}";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct {{pascalCase params_name}} {
 {{#each parameters}}
-    pub {{camelCase name}}: {{type_name}},
+    pub {{snakeCase name}}: {{{type_name}}},
 {{/each}}
 }
 

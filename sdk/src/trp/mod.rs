@@ -1,8 +1,8 @@
 use reqwest::header;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value, Map};
-use tx3_lang::ArgValue;
+use serde_json::{Map, Value, json};
 use std::collections::HashMap;
+use tx3_lang::ArgValue;
 use uuid::Uuid;
 
 // Custom error type for TRP operations
@@ -33,7 +33,7 @@ pub struct TirInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxEnvelope {
-    pub tx: String
+    pub tx: String,
 }
 
 #[derive(Debug, Clone)]
@@ -81,7 +81,7 @@ impl Client {
             header::CONTENT_TYPE,
             header::HeaderValue::from_static("application/json"),
         );
-        
+
         if let Some(user_headers) = &self.options.headers {
             for (key, value) in user_headers {
                 if let Ok(header_name) = header::HeaderName::from_bytes(key.as_bytes()) {
@@ -105,7 +105,8 @@ impl Client {
         });
 
         // Send request
-        let response = self.client
+        let response = self
+            .client
             .post(&self.options.endpoint)
             .headers(headers)
             .json(&body)
@@ -117,25 +118,30 @@ impl Client {
         if !response.status().is_success() {
             return Err(Error::StatusCodeError(
                 response.status().as_u16(),
-                response.status().to_string()
+                response.status().to_string(),
             ));
         }
 
         // Parse response
-        let result: JsonRpcResponse = response.json().await
+        let result: JsonRpcResponse = response
+            .json()
+            .await
             .map_err(|e| Error::DeserializationError(e.to_string()))?;
 
         // Handle possible error
         if let Some(error) = result.error {
             return Err(Error::JsonRpcError(
                 error.message,
-                error.data
+                error
+                    .data
                     .map_or_else(|| "No data".to_string(), |v| v.to_string()),
             ));
         }
 
         // Return result
-        result.result.ok_or_else(|| Error::UnknownError("No result in response".to_string()))
+        result
+            .result
+            .ok_or_else(|| Error::UnknownError("No result in response".to_string()))
     }
 }
 
@@ -158,23 +164,20 @@ fn flatten_json_values(value: Value) -> Value {
                     return Value::Number(s.clone());
                 }
             }
-            
+
             // Process each field in the object
             let mut new_map = Map::new();
             for (key, val) in map {
                 new_map.insert(key, flatten_json_values(val));
             }
             Value::Object(new_map)
-        },
+        }
         Value::Array(arr) => {
             // Process each element in the array
-            Value::Array(
-                arr.into_iter()
-                    .map(flatten_json_values)
-                    .collect()
-            )
-        },
+            Value::Array(arr.into_iter().map(flatten_json_values).collect())
+        }
         // Return other value types as is
-        _ => value
+        _ => value,
     }
 }
+
