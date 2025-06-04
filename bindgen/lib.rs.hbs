@@ -3,7 +3,9 @@
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 
-use tx3_sdk::trp::{ClientOptions, ProtoTxRequest, TirInfo, TxEnvelope};
+pub use tx3_lang::ArgValue;
+pub use tx3_sdk::trp::ClientOptions;
+use tx3_sdk::trp::{ProtoTxRequest, TirInfo, TxEnvelope};
 
 pub const DEFAULT_TRP_ENDPOINT: &str = "{{trpEndpoint}}";
 
