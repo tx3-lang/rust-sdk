@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 
+use tx3_sdk::tx3_lang;
 pub use tx3_lang::ArgValue;
 pub use tx3_sdk::trp::ClientOptions;
 use tx3_sdk::trp::{ProtoTxRequest, TirInfo, TxEnvelope};
@@ -35,7 +36,7 @@ impl {{pascalCase params_name}} {
         let mut map = HashMap::new();
 
         {{#each parameters}}
-           map.insert("{{snakeCase name}}".to_string(), self.{{snakeCase name}}.clone());
+        map.insert("{{snakeCase name}}".to_string(), self.{{snakeCase name}}.clone());
         {{/each}}
 
         map
