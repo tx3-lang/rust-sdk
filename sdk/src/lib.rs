@@ -19,3 +19,4 @@
  */
 
 pub mod trp;
+pub use tx3_lang;
