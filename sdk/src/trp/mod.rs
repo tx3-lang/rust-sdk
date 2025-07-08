@@ -1,10 +1,12 @@
 use reqwest::header;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-pub use tx3_lang::ArgValue;
+pub mod args;
+
+pub use args::ArgValue;
 
 // Custom error type for TRP operations
 #[derive(Debug, thiserror::Error)]
@@ -93,13 +95,19 @@ impl Client {
             }
         }
 
+        let args: HashMap<_, _> = proto_tx
+            .args
+            .into_iter()
+            .map(|(k, v)| (k, args::to_json(v)))
+            .collect();
+
         // Prepare request body with FlattenedArgs for proper serialization
         let body = json!({
             "jsonrpc": "2.0",
             "method": "trp.resolve",
             "params": {
                 "tir": proto_tx.tir,
-                "args": handle_arg_values(&proto_tx.args),
+                "args": args,
                 "env": self.options.env_args,
             },
             "id": Uuid::new_v4().to_string(),
@@ -144,34 +152,4 @@ impl Client {
             .result
             .ok_or_else(|| Error::UnknownError("No result in response".to_string()))
     }
-}
-
-fn handle_arg_values(args: &HashMap<String, ArgValue>) -> Map<String, Value> {
-    let mut map = Map::new();
-
-    for (key, value) in args {
-        match value {
-            ArgValue::Int(i) => {
-                // TODO: map error for bigger numbers
-                map.insert(key.clone(), Value::Number((*i as i64).into()));
-            }
-            ArgValue::Bool(b) => {
-                map.insert(key.clone(), Value::Bool(*b));
-            }
-            ArgValue::String(s) => {
-                map.insert(key.clone(), Value::String(s.clone()));
-            }
-            ArgValue::Bytes(b) => {
-                map.insert(key.clone(), Value::String(format!("0x{}", hex::encode(b))));
-            }
-            ArgValue::Address(a) => {
-                map.insert(key.clone(), Value::String(hex::encode(a)));
-            }
-            _ => {
-                unimplemented!("{}", key);
-            }
-        }
-    }
-
-    map
 }
