@@ -1,3 +1,18 @@
 [workspace]
 resolver = "2"
 members = ["sdk"]
+
+[workspace.package]
+publish = true
+authors = ["TxPipe"]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/tx3-lang/rust-sdk"
+version = "0.2.0"
+keywords = ["blockchain", "cardano", "utxo", "dsl"]
+documentation = "https://docs.rs/tx3-sdk"
+homepage = "https://github.com/tx3-lang/rust-sdk"
+readme = "README.md"
+
+[workspace.dependencies]
+tx3-lang = "0.7.2"
