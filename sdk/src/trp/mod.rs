@@ -2,8 +2,9 @@ use reqwest::header;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
-use tx3_lang::ArgValue;
 use uuid::Uuid;
+
+pub use tx3_lang::ArgValue;
 
 // Custom error type for TRP operations
 #[derive(Debug, thiserror::Error)]
@@ -63,7 +64,7 @@ pub struct Client {
 
 pub struct ProtoTxRequest {
     pub tir: TirInfo,
-    pub args: HashMap<String, tx3_lang::ArgValue>,
+    pub args: HashMap<String, ArgValue>,
 }
 
 impl Client {
