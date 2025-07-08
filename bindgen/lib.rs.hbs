@@ -26,11 +26,11 @@ pub const {{constantCase constant_name}}: &str = "{{ir_bytes}}";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct {{pascalCase params_name}} {
 {{#each parameters}}
-    pub {{snakeCase name}}: tx3_lang::ArgValue,
+    pub {{snakeCase name}}: ArgValue,
 {{/each}}
 }
 impl {{pascalCase params_name}} {
-    fn to_map(&self) -> HashMap<String, tx3_lang::ArgValue> {
+    fn to_map(&self) -> HashMap<String, ArgValue> {
         let mut map = HashMap::new();
 
         {{#each parameters}}
@@ -59,9 +59,9 @@ impl Client {
             headers.insert(key.to_string(), value.to_string());
         }
 
-        let mut env_args: HashMap<String, tx3_lang::ArgValue> = HashMap::new();
+        let mut env_args: HashMap<String, ArgValue> = HashMap::new();
         for (key, value) in DEFAULT_ENV_ARGS {
-            env_args.insert(key.to_string(), tx3_lang::ArgValue::String(value.to_string()));
+            env_args.insert(key.to_string(), ArgValue::String(value.to_string()));
         }
 
         Self::new(ClientOptions {
