@@ -3,8 +3,7 @@
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 
-pub use tx3_lang::ArgValue;
-pub use tx3_sdk::trp::ClientOptions;
+pub use tx3_sdk::trp::{ClientOptions,ArgValue};
 use tx3_sdk::trp::{ProtoTxRequest, TirInfo, TxEnvelope};
 
 pub const DEFAULT_TRP_ENDPOINT: &str = "{{trpEndpoint}}";
@@ -35,7 +34,7 @@ impl {{pascalCase params_name}} {
         let mut map = HashMap::new();
 
         {{#each parameters}}
-           map.insert("{{snakeCase name}}".to_string(), self.{{snakeCase name}}.clone());
+        map.insert("{{snakeCase name}}".to_string(), self.{{snakeCase name}}.clone());
         {{/each}}
 
         map
