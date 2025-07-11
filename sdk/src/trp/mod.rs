@@ -1,6 +1,6 @@
 use reqwest::header;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -32,6 +32,25 @@ pub struct TirInfo {
     pub version: String,
     pub bytecode: String,
     pub encoding: String, // "base64" | "hex" | other
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VKeyWitness {
+    pub key: args::BytesEnvelope,
+    pub signature: args::BytesEnvelope,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum SubmitWitness {
+    #[serde(rename = "vkey")]
+    VKey(VKeyWitness),
+}
+
+#[derive(Deserialize, Debug)]
+pub struct SubmitParams {
+    pub tx: args::BytesEnvelope,
+    pub witnesses: Vec<SubmitWitness>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
