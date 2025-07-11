@@ -76,7 +76,7 @@ fn hex_to_bytes(s: &str) -> Result<Vec<u8>, Error> {
     let s = if s.starts_with("0x") {
         s.trim_start_matches("0x")
     } else {
-        &s
+        s
     };
 
     hex::decode(s).map_err(Error::InvalidHex)
@@ -105,7 +105,7 @@ fn value_to_bytes(value: Value) -> Result<Vec<u8>, Error> {
 }
 
 fn bech32_to_bytes(s: &str) -> Result<Vec<u8>, Error> {
-    let (_, data) = bech32::decode(&s).map_err(Error::InvalidBech32)?;
+    let (_, data) = bech32::decode(s).map_err(Error::InvalidBech32)?;
     Ok(data)
 }
 
