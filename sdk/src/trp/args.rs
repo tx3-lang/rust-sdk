@@ -1,18 +1,27 @@
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use serde_json::{Number, Value, json};
+use serde_json::{json, Number, Value};
 use thiserror::Error;
-use tx3_lang::{UtxoRef, ir::Type};
+use tx3_lang::{ir::Type, UtxoRef};
 
 pub use tx3_lang::ArgValue;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct BytesEnvelope {
-    content: String,
-    encoding: BytesEncoding,
+    pub content: String,
+    pub encoding: BytesEncoding,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+impl From<BytesEnvelope> for Vec<u8> {
+    fn from(envelope: BytesEnvelope) -> Self {
+        match envelope.encoding {
+            BytesEncoding::Base64 => base64_to_bytes(&envelope.content).unwrap(),
+            BytesEncoding::Hex => hex_to_bytes(&envelope.content).unwrap(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum BytesEncoding {
     Base64,
