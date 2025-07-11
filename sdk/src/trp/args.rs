@@ -37,7 +37,7 @@ fn bigint_to_value(i: i128) -> Value {
         Value::Number((i as i64).into())
     } else {
         let ashex = hex::encode(i.to_be_bytes());
-        Value::String(format!("0x{}", ashex))
+        Value::String(format!("0x{ashex}"))
     }
 }
 
