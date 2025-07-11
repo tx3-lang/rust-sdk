@@ -15,4 +15,5 @@ homepage = "https://github.com/tx3-lang/rust-sdk"
 readme = "README.md"
 
 [workspace.dependencies]
-tx3-lang = "0.8.1"
+tx3-lang = "0.8.2"
+# tx3-lang = { path = "../tx3/crates/tx3-lang" }
