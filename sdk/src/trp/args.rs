@@ -12,6 +12,15 @@ pub struct BytesEnvelope {
     pub encoding: BytesEncoding,
 }
 
+impl BytesEnvelope {
+    pub fn from_hex(hex: &str) -> Result<Self, Error> {
+        Ok(Self {
+            content: hex.to_string(),
+            encoding: BytesEncoding::Hex,
+        })
+    }
+}
+
 impl From<BytesEnvelope> for Vec<u8> {
     fn from(envelope: BytesEnvelope) -> Self {
         match envelope.encoding {
