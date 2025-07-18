@@ -8,6 +8,8 @@ pub mod args;
 
 pub use args::ArgValue;
 
+use crate::trp::args::BytesEnvelope;
+
 // Custom error type for TRP operations
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -47,15 +49,21 @@ pub enum SubmitWitness {
     VKey(VKeyWitness),
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Serialize)]
 pub struct SubmitParams {
     pub tx: args::BytesEnvelope,
     pub witnesses: Vec<SubmitWitness>,
 }
 
+#[derive(Deserialize, Debug, Serialize)]
+pub struct SubmitResponse {
+    pub hash: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TxEnvelope {
     pub tx: String,
+    pub hash: String,
 }
 
 #[derive(Debug, Clone)]
@@ -65,9 +73,17 @@ pub struct ClientOptions {
     pub env_args: Option<HashMap<String, ArgValue>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JsonRpcRequest {
+    pub jsonrpc: String,
+    pub method: String,
+    pub params: serde_json::Value,
+    pub id: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct JsonRpcResponse {
-    result: Option<TxEnvelope>,
+    result: Option<serde_json::Value>,
     error: Option<JsonRpcError>,
 }
 
@@ -96,7 +112,11 @@ impl Client {
         }
     }
 
-    pub async fn resolve(&self, proto_tx: ProtoTxRequest) -> Result<TxEnvelope, Error> {
+    pub async fn call(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, Error> {
         // Prepare headers
         let mut headers = header::HeaderMap::new();
         headers.insert(
@@ -114,30 +134,20 @@ impl Client {
             }
         }
 
-        let args: HashMap<_, _> = proto_tx
-            .args
-            .into_iter()
-            .map(|(k, v)| (k, args::to_json(v)))
-            .collect();
-
         // Prepare request body with FlattenedArgs for proper serialization
-        let body = json!({
-            "jsonrpc": "2.0",
-            "method": "trp.resolve",
-            "params": {
-                "tir": proto_tx.tir,
-                "args": args,
-                "env": self.options.env_args,
-            },
-            "id": Uuid::new_v4().to_string(),
-        });
+        let body = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            method: method.to_string(),
+            params,
+            id: Uuid::new_v4().to_string(),
+        };
 
         // Send request
         let response = self
             .client
             .post(&self.options.endpoint)
             .headers(headers)
-            .json(&body)
+            .json(&serde_json::to_value(body).unwrap())
             .send()
             .await
             .map_err(Error::from)?;
@@ -170,5 +180,41 @@ impl Client {
         result
             .result
             .ok_or_else(|| Error::UnknownError("No result in response".to_string()))
+    }
+
+    pub async fn resolve(&self, proto_tx: ProtoTxRequest) -> Result<TxEnvelope, Error> {
+        let params = json!({
+            "tir": proto_tx.tir,
+            "args": HashMap::<String, serde_json::Value>::from_iter(proto_tx.args.into_iter().map(|(k, v)| (k, args::to_json(v)))),
+            "env": self.options.env_args,
+        });
+
+        let response = self.call("trp.resolve", params).await?;
+
+        // Return result
+        let out = serde_json::from_value(response)
+            .map_err(|e| Error::DeserializationError(e.to_string()))?;
+
+        Ok(out)
+    }
+
+    pub async fn submit(
+        &self,
+        tx: TxEnvelope,
+        witnesses: Vec<SubmitWitness>,
+    ) -> Result<SubmitResponse, Error> {
+        let params = serde_json::to_value(SubmitParams {
+            tx: BytesEnvelope::from_hex(&tx.tx).unwrap(),
+            witnesses,
+        })
+        .unwrap();
+
+        let response = self.call("trp.submit", params).await?;
+
+        // Return result
+        let out = serde_json::from_value(response)
+            .map_err(|e| Error::DeserializationError(e.to_string()))?;
+
+        Ok(out)
     }
 }
