@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 
 pub use tx3_sdk::trp::{ClientOptions,ArgValue};
-use tx3_sdk::trp::{ProtoTxRequest, TirInfo, TxEnvelope};
+use tx3_sdk::trp::{ProtoTxRequest, TirInfo, TxEnvelope, SubmitParams, SubmitResponse, SubmitWitness};
 
 pub const DEFAULT_TRP_ENDPOINT: &str = "{{trpEndpoint}}";
 
@@ -85,6 +85,10 @@ impl Client {
         }).await
     }
 {{/each}}
+
+    pub async fn submit(&self, tx: TxEnvelope, witnesses: Vec<SubmitWitness>) -> Result<SubmitResponse, tx3_sdk::trp::Error> {
+        self.client.submit(tx, witnesses).await
+    }
 }
 
 // Create a default client instance
