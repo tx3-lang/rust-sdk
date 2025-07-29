@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 pub mod args;
+pub mod error;
 
 pub use args::ArgValue;
 
