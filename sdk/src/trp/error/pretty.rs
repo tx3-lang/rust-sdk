@@ -44,7 +44,7 @@ impl PrettyError for Expression {
             Expression::Number(n) => n.to_string(),
             Expression::Bool(b) => b.to_string(),
             Expression::String(s) => s.to_owned(),
-            Expression::Address(addr) => Address::from_bytes(&addr).unwrap().to_bech32().unwrap(),
+            Expression::Address(addr) => Address::from_bytes(addr).unwrap().to_bech32().unwrap(),
             Expression::Hash(hash) => hex::encode(hash),
             Expression::UtxoRefs(refs) => refs
                 .iter()
@@ -198,25 +198,25 @@ impl PrettyError for BackendError {
     fn pretty(&self) -> String {
         match self {
             BackendError::TransientError(s) => {
-                format!("a transient error occurred: {}", s)
+                format!("a transient error occurred: {s}")
             }
-            BackendError::StoreError(s) => format!("a storage error occurred: {}", s),
-            BackendError::InvalidPattern(s) => format!("invalid pattern: {}", s),
+            BackendError::StoreError(s) => format!("a storage error occurred: {s}"),
+            BackendError::InvalidPattern(s) => format!("invalid pattern: {s}"),
             BackendError::UtxoNotFound(utxo_ref) => {
                 format!("UTXO not found: {}", utxo_ref.pretty())
             }
             BackendError::CoerceError(from, to) => {
-                format!("error coercing {} into {}", from, to)
+                format!("error coercing {from} into {to}")
             }
             BackendError::ConsistencyError(s) => {
-                format!("a consistency error occurred: {}", s)
+                format!("a consistency error occurred: {s}")
             }
-            BackendError::ArgNotAssigned(s) => format!("argument not assigned: {}", s),
-            BackendError::FormatError(s) => format!("a format error occurred: {}", s),
-            BackendError::MissingExpression(s) => format!("missing expression: {}", s),
-            BackendError::ValueOverflow(s) => format!("a value overflow occurred: {}", s),
+            BackendError::ArgNotAssigned(s) => format!("argument not assigned: {s}"),
+            BackendError::FormatError(s) => format!("a format error occurred: {s}"),
+            BackendError::MissingExpression(s) => format!("missing expression: {s}"),
+            BackendError::ValueOverflow(s) => format!("a value overflow occurred: {s}"),
             BackendError::NoAstAnalysis => "no AST analysis was performed".to_string(),
-            BackendError::CantResolveSymbol(s) => format!("can't resolve symbol: {}", s),
+            BackendError::CantResolveSymbol(s) => format!("can't resolve symbol: {s}"),
             BackendError::CantReduce(op) => format!("can't reduce: {}", op.pretty()),
         }
     }
@@ -229,22 +229,22 @@ impl PrettyError for ApplyingError {
                 format!("invalid built-in operation: {}", op.pretty())
             }
             ApplyingError::BackendError(be) => {
-                format!("a backend error occurred: {}", be)
+                format!("a backend error occurred: {be}")
             }
             ApplyingError::InvalidArgument(val, name) => {
-                format!("invalid argument {:?} for {}", val, name)
+                format!("invalid argument {val:?} for {name}")
             }
             ApplyingError::PropertyNotFound(prop, obj) => {
-                format!("property '{}' not found in {}", prop, obj)
+                format!("property '{prop}' not found in {obj}")
             }
             ApplyingError::PropertyIndexNotFound(idx, obj) => {
-                format!("property index {} not found in {}", idx, obj)
+                format!("property index {idx} not found in {obj}")
             }
             ApplyingError::InvalidBinaryOp(op, a, b) => {
-                format!("invalid binary operation '{}' over {} and {}", op, a, b)
+                format!("invalid binary operation '{op}' over {a} and {b}")
             }
             ApplyingError::InvalidUnaryOp(op, a) => {
-                format!("invalid unary operation '{}' over {}", op, a)
+                format!("invalid unary operation '{op}' over {a}")
             }
             ApplyingError::CannotCoerceIntoAssets(expr) => {
                 format!("cannot coerce {} into assets", expr.pretty())
