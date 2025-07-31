@@ -14,15 +14,6 @@ pub trait PrettyError {
 impl PrettyError for ResolverError {
     fn pretty(&self) -> String {
         match self {
-            ResolverError::InputQueryTooBroad => {
-                "Input query is too broad, try adding more constraints.".to_string()
-            }
-            ResolverError::InputNotResolved(v, q) => {
-                format!("Input not resolved: {} with {}", v, q.pretty())
-            }
-            ResolverError::ExpectedData(data_type, expression) => {
-                format!("Expected {}, got {}", data_type, expression.pretty())
-            }
             ResolverError::ApplyError(error) => {
                 format!("Apply error: {}", error.pretty())
             }
@@ -32,6 +23,23 @@ impl PrettyError for ResolverError {
             ResolverError::BackendError(error) => {
                 format!("Backend error: {}", error.pretty())
             }
+            ResolverError::InputsError(error) => match error {
+                tx3_resolver::inputs::Error::InputQueryTooBroad => {
+                    "Input query is too broad, try adding more constraints.".to_string()
+                }
+                tx3_resolver::inputs::Error::ExpectedData(data_type, expression) => {
+                    format!("Input expected {}, got {}", data_type, expression.pretty())
+                }
+                tx3_resolver::inputs::Error::InputNotResolved(v, q, s) => {
+                    format!("Input not resolved: {v} with {q} {s}")
+                }
+                tx3_resolver::inputs::Error::StoreError(error) => {
+                    format!("Input a storage error occurred: {}", error.pretty())
+                }
+                tx3_resolver::inputs::Error::ApplyError(error) => {
+                    format!("Input apply error: {}", error.pretty())
+                }
+            },
         }
     }
 }
@@ -178,6 +186,9 @@ impl PrettyError for CompilerOp {
         match self {
             CompilerOp::BuildScriptAddress(expr) => {
                 format!("build_script_address({})", expr.pretty())
+            }
+            CompilerOp::ComputeMinUtxo(expr) => {
+                format!("compute_min_utxo({})", expr.pretty())
             }
         }
     }

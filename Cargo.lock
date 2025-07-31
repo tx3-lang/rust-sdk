@@ -1721,9 +1721,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.29"
+version = "0.23.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2491382039b29b9b11ff08b76ff6c97cf287671dbb74f0be44bda389fffe9bd1"
+checksum = "c0ebcbd2f03de0fc1122ad9bb24b127a5a6cd51d72604a3f3c50ac459762b6cc"
 dependencies = [
  "once_cell",
  "ring",
@@ -2280,9 +2280,9 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tx3-lang"
-version = "0.10.1"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ffaa32efb0788a1de7a67be5b13233a6b24a5cce0247c6d7411cb4c84e88b88"
+checksum = "6b9d050963aff1d574bfc4635d01b01e09df2401633ccbf83c24797de5f426b9"
 dependencies = [
  "bincode",
  "hex",
@@ -2296,10 +2296,11 @@ dependencies = [
 
 [[package]]
 name = "tx3-resolver"
-version = "0.10.1"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d50ad0c4d6b63a3d425044ba40aa96dd1092a8366bacfebe562c3cafa10a6769"
+checksum = "9c4b6d485b257ffbdd41f0bfa9d9f2e5ab31a89cc174e92c048f83f8b5964337"
 dependencies = [
+ "hex",
  "thiserror 2.0.12",
  "trait-variant",
  "tx3-lang",
