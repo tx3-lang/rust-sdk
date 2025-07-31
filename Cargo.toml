@@ -16,4 +16,5 @@ readme = "README.md"
 
 [workspace.dependencies]
 tx3-lang = "^0"
+tx3-resolver = "^0"
 # tx3-lang = { version = "*", path = "../tx3/crates/tx3-lang" }
