@@ -1,7 +1,8 @@
 use reqwest::header;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use thiserror::Error;
 use uuid::Uuid;
 
 pub mod args;
@@ -10,23 +11,135 @@ pub use args::ArgValue;
 
 use crate::trp::args::BytesEnvelope;
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SearchSpaceDiagnostic {
+    pub matched: Vec<String>,
+    pub by_address_count: Option<usize>,
+    pub by_asset_class_count: Option<usize>,
+    pub by_ref_count: Option<usize>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct InputQueryDiagnostic {
+    pub address: Option<String>,
+    pub min_amount: HashMap<String, String>,
+    pub refs: Vec<String>,
+    pub support_many: bool,
+    pub collateral: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Error)]
+#[error("input `{name}` not resolved")]
+pub struct InputNotResolvedDiagnostic {
+    pub name: String,
+    pub query: InputQueryDiagnostic,
+    pub search_space: SearchSpaceDiagnostic,
+}
+
+#[derive(Debug, Serialize, Deserialize, Error)]
+#[error("TIR version {provided} is not supported, expected {expected}")]
+pub struct UnsupportedTirDiagnostic {
+    pub provided: String,
+    pub expected: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Error)]
+#[error("tx script returned failure")]
+pub struct TxScriptFailureDiagnostic {
+    pub logs: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Error)]
+#[error("missing argument `{key}` of type {ty}")]
+pub struct MissingTxArgDiagnostic {
+    pub key: String,
+    #[serde(rename = "type")]
+    pub ty: String,
+}
+
 // Custom error type for TRP operations
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Error)]
 pub enum Error {
     #[error("network error: {0}")]
     NetworkError(#[from] reqwest::Error),
 
     #[error("HTTP error {0}: {1}")]
-    StatusCodeError(u16, String),
+    HttpError(u16, String),
 
     #[error("Failed to deserialize response: {0}")]
     DeserializationError(String),
 
-    #[error("JSON-RPC error: {1}")]
-    JsonRpcError(String, String),
+    #[error("({0}) {1}")]
+    GenericRpcError(i32, String, Option<Value>),
 
     #[error("Unknown error: {0}")]
     UnknownError(String),
+
+    #[error(transparent)]
+    UnsupportedTir(UnsupportedTirDiagnostic),
+
+    #[error("invalid TIR envelope")]
+    InvalidTirEnvelope,
+
+    #[error("failed to decode IR bytes")]
+    InvalidTirBytes,
+
+    #[error("only txs from Conway era are supported")]
+    UnsupportedTxEra,
+
+    #[error("node can't resolve txs while running at era {era}")]
+    UnsupportedEra { era: String },
+
+    #[error(transparent)]
+    MissingTxArg(MissingTxArgDiagnostic),
+
+    #[error(transparent)]
+    InputNotResolved(InputNotResolvedDiagnostic),
+
+    #[error(transparent)]
+    TxScriptFailure(TxScriptFailureDiagnostic),
+}
+
+impl Error {
+    fn generic(payload: JsonRpcError) -> Self {
+        Self::GenericRpcError(payload.code, payload.message, payload.data)
+    }
+}
+
+fn expect_json_rpc_error_data<T: DeserializeOwned>(payload: JsonRpcError) -> Result<T, Error> {
+    let Some(data) = payload.data.clone() else {
+        return Err(Error::generic(payload));
+    };
+
+    let Ok(data) = serde_json::from_value(data.clone()) else {
+        return Err(Error::generic(payload));
+    };
+
+    Ok(data)
+}
+
+impl From<JsonRpcError> for Error {
+    fn from(error: JsonRpcError) -> Self {
+        match error.code {
+            -32000 => match expect_json_rpc_error_data(error) {
+                Ok(data) => Error::UnsupportedTir(data),
+                Err(e) => e,
+            },
+            -32001 => match expect_json_rpc_error_data(error) {
+                Ok(data) => Error::MissingTxArg(data),
+                Err(e) => e,
+            },
+            -32002 => match expect_json_rpc_error_data(error) {
+                Ok(data) => Error::InputNotResolved(data),
+                Err(e) => e,
+            },
+            -32003 => match expect_json_rpc_error_data(error) {
+                Ok(data) => Error::TxScriptFailure(data),
+                Err(e) => e,
+            },
+            _ => Error::generic(error),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,6 +202,7 @@ struct JsonRpcResponse {
 
 #[derive(Debug, Deserialize)]
 struct JsonRpcError {
+    code: i32,
     message: String,
     data: Option<Value>,
 }
@@ -152,9 +266,9 @@ impl Client {
             .await
             .map_err(Error::from)?;
 
-        // Check if response is successful
+        // If the response at the HTTP level is not successful, return an error
         if !response.status().is_success() {
-            return Err(Error::StatusCodeError(
+            return Err(Error::HttpError(
                 response.status().as_u16(),
                 response.status().to_string(),
             ));
@@ -168,15 +282,9 @@ impl Client {
 
         // Handle possible error
         if let Some(error) = result.error {
-            return Err(Error::JsonRpcError(
-                error.message,
-                error
-                    .data
-                    .map_or_else(|| "No data".to_string(), |v| v.to_string()),
-            ));
+            return Err(Error::from(error));
         }
 
-        // Return result
         result
             .result
             .ok_or_else(|| Error::UnknownError("No result in response".to_string()))
@@ -211,7 +319,6 @@ impl Client {
 
         let response = self.call("trp.submit", params).await?;
 
-        // Return result
         let out = serde_json::from_value(response)
             .map_err(|e| Error::DeserializationError(e.to_string()))?;
 
