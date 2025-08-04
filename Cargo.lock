@@ -1284,7 +1284,7 @@ dependencies = [
 
 [[package]]
 name = "tx3-sdk"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "base64",
  "bech32",
