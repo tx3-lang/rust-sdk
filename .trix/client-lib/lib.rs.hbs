@@ -1,0 +1,95 @@
+// This file is auto-generated.
+
+use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
+
+pub use tx3_sdk::trp::{ClientOptions,ArgValue};
+use tx3_sdk::trp::{ProtoTxRequest, TirInfo, TxEnvelope, SubmitParams, SubmitResponse, SubmitWitness};
+
+pub const DEFAULT_TRP_ENDPOINT: &str = "{{trpEndpoint}}";
+
+pub const DEFAULT_HEADERS: &[(&str, &str)] = &[
+{{#each headers}}
+    ("{{@key}}", "{{this}}"),
+{{/each}}
+];
+
+pub const DEFAULT_ENV_ARGS: &[(&str, &str)] = &[
+{{#each envArgs}}
+    ("{{@key}}", "{{this}}"),
+{{/each}}
+];
+
+{{#each transactions}}
+pub const {{constantCase constant_name}}: &str = "{{ir_bytes}}";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct {{pascalCase params_name}} {
+{{#each parameters}}
+    pub {{snakeCase name}}: ArgValue,
+{{/each}}
+}
+impl {{pascalCase params_name}} {
+    fn to_map(&self) -> HashMap<String, ArgValue> {
+        let mut map = HashMap::new();
+
+        {{#each parameters}}
+        map.insert("{{snakeCase name}}".to_string(), self.{{snakeCase name}}.clone());
+        {{/each}}
+
+        map
+    }
+}
+
+{{/each}}
+pub struct Client {
+    client: tx3_sdk::trp::Client,
+}
+
+impl Client {
+    pub fn new(options: ClientOptions) -> Self {
+        Self {
+            client: tx3_sdk::trp::Client::new(options),
+        }
+    }
+
+    pub fn with_default_options() -> Self {
+        let mut headers = HashMap::new();
+        for (key, value) in DEFAULT_HEADERS {
+            headers.insert(key.to_string(), value.to_string());
+        }
+
+        let mut env_args: HashMap<String, ArgValue> = HashMap::new();
+        for (key, value) in DEFAULT_ENV_ARGS {
+            env_args.insert(key.to_string(), ArgValue::String(value.to_string()));
+        }
+
+        Self::new(ClientOptions {
+            endpoint: DEFAULT_TRP_ENDPOINT.to_string(),
+            headers: Some(headers),
+            env_args: Some(env_args),
+        })
+    }
+{{#each transactions}}
+
+    pub async fn {{snakeCase function_name}}(&self, args: {{pascalCase params_name}}) -> Result<TxEnvelope, tx3_sdk::trp::Error> {
+        let tir_info = TirInfo {
+            bytecode: {{constantCase constant_name}}.to_string(),
+            encoding: "hex".to_string(),
+            version: "{{ir_version}}".to_string(),
+        };
+
+        self.client.resolve(ProtoTxRequest {
+            tir: tir_info,
+            args: args.to_map(),
+        }).await
+    }
+{{/each}}
+
+    pub async fn submit(&self, tx: TxEnvelope, witnesses: Vec<SubmitWitness>) -> Result<SubmitResponse, tx3_sdk::trp::Error> {
+        self.client.submit(tx, witnesses).await
+    }
+}
+
+// Create a default client instance
+pub static PROTOCOL: once_cell::sync::Lazy<Client> = once_cell::sync::Lazy::new(|| Client::with_default_options());
