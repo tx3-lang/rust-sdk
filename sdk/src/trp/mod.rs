@@ -208,6 +208,7 @@ struct JsonRpcError {
 }
 
 /// Client for the Transaction Resolve Protocol (TRP)
+#[derive(Clone)]
 pub struct Client {
     options: ClientOptions,
     client: reqwest::Client,
