@@ -2,7 +2,7 @@ use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Number, Value};
 use thiserror::Error;
-use tx3_lang::{ir::Type, UtxoRef};
+use tx3_lang::{ir::Type, CustomValue, UtxoRef};
 
 pub use tx3_lang::ArgValue;
 
@@ -157,6 +157,59 @@ fn value_to_utxo_ref(value: Value) -> Result<UtxoRef, Error> {
     }
 }
 
+fn value_to_custom(value: Value) -> Result<CustomValue, Error> {
+    let obj = match value {
+        Value::Object(map) => map,
+        x => return Err(Error::ValueIsNotCustom(x)),
+    };
+
+    let constructor = obj
+        .get("constructor")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| Error::InvalidCustomType("missing or invalid constructor".to_string()))?
+        as usize;
+
+    let fields_value = obj
+        .get("fields")
+        .ok_or_else(|| Error::InvalidCustomType("missing fields".to_string()))?;
+
+    let fields_array = match fields_value {
+        Value::Array(arr) => arr,
+        _ => {
+            return Err(Error::InvalidCustomType(
+                "fields is not an array".to_string(),
+            ))
+        }
+    };
+
+    // recursively deserialize each field
+    let fields: Result<Vec<ArgValue>, Error> = fields_array
+        .iter()
+        .cloned()
+        .map(|field_value| {
+            if let Value::Object(ref obj) = field_value {
+                if obj.contains_key("constructor") && obj.contains_key("fields") {
+                    return value_to_custom(field_value).map(ArgValue::Custom);
+                }
+            }
+            value_to_underfined(field_value)
+        })
+        .collect();
+
+    Ok(CustomValue {
+        constructor,
+        fields: fields?,
+    })
+}
+
+fn custom_to_value(custom: CustomValue) -> Value {
+    let fields: Vec<Value> = custom.fields.into_iter().map(to_json).collect();
+    json!({
+        "constructor": custom.constructor,
+        "fields": fields
+    })
+}
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("value is null")]
@@ -185,6 +238,12 @@ pub enum Error {
 
     #[error("value is not a utxo ref: {0}")]
     ValueIsNotUtxoRef(Value),
+
+    #[error("value is not a custom type: {0}")]
+    ValueIsNotCustom(Value),
+
+    #[error("invalid custom type: {0}")]
+    InvalidCustomType(String),
 
     #[error("invalid bytes envelope: {0}")]
     InvalidBytesEnvelope(serde_json::Error),
@@ -220,6 +279,7 @@ pub fn to_json(value: ArgValue) -> Value {
             Value::Array(v)
         }
         ArgValue::UtxoRef(x) => utxoref_to_value(x),
+        ArgValue::Custom(x) => custom_to_value(x),
     }
 }
 
@@ -244,6 +304,10 @@ pub fn from_json(value: Value, target: &Type) -> Result<ArgValue, Error> {
         Type::UtxoRef => {
             let x = value_to_utxo_ref(value)?;
             Ok(ArgValue::UtxoRef(x))
+        }
+        Type::Custom(_) => {
+            let x = value_to_custom(value)?;
+            Ok(ArgValue::Custom(x))
         }
         Type::Undefined => value_to_underfined(value),
         x => Err(Error::TargetTypeNotSupported(x.clone())),
@@ -283,6 +347,18 @@ mod tests {
             },
             ArgValue::UtxoRef(utxo_ref) => match b {
                 ArgValue::UtxoRef(b) => utxo_ref == b,
+                _ => false,
+            },
+            ArgValue::Custom(custom) => match b {
+                ArgValue::Custom(b) => {
+                    custom.constructor == b.constructor
+                        && custom.fields.len() == b.fields.len()
+                        && custom
+                            .fields
+                            .into_iter()
+                            .zip(b.fields)
+                            .all(|(a, b)| partial_eq(a, b))
+                }
                 _ => false,
             },
         }
