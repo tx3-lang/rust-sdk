@@ -15,5 +15,6 @@ homepage = "https://github.com/tx3-lang/rust-sdk"
 readme = "README.md"
 
 [workspace.dependencies]
-tx3-lang = "^0"
+#tx3-lang = "^0"
+tx3-lang = { version = "*", git = "https://github.com/tx3-lang/tx3", branch = "bookio" }
 # tx3-lang = { version = "*", path = "../tx3/crates/tx3-lang" }
