@@ -280,6 +280,10 @@ pub fn to_json(value: ArgValue) -> Value {
         }
         ArgValue::UtxoRef(x) => utxoref_to_value(x),
         ArgValue::Custom(x) => custom_to_value(x),
+        ArgValue::List(values) => {
+            let v = values.into_iter().map(|x| to_json(x)).collect();
+            Value::Array(v)
+        }
     }
 }
 
@@ -308,6 +312,20 @@ pub fn from_json(value: Value, target: &Type) -> Result<ArgValue, Error> {
         Type::Custom(_) => {
             let x = value_to_custom(value)?;
             Ok(ArgValue::Custom(x))
+        }
+        Type::List => {
+            let arr = match value {
+                Value::Array(arr) => arr,
+                _ => return Err(Error::ValueIsNotAString),
+            };
+
+            let mut values = Vec::with_capacity(arr.len());
+            for item in arr {
+                let v = from_json(item, &Type::Undefined)?;
+                values.push(v);
+            }
+
+            Ok(ArgValue::List(values))
         }
         Type::Undefined => value_to_underfined(value),
         x => Err(Error::TargetTypeNotSupported(x.clone())),
@@ -358,6 +376,13 @@ mod tests {
                             .into_iter()
                             .zip(b.fields)
                             .all(|(a, b)| partial_eq(a, b))
+                }
+                _ => false,
+            },
+            ArgValue::List(values) => match b {
+                ArgValue::List(b) => {
+                    values.len() == b.len()
+                        && values.into_iter().zip(b).all(|(a, b)| partial_eq(a, b))
                 }
                 _ => false,
             },
