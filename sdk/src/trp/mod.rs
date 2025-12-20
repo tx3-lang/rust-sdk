@@ -1,61 +1,23 @@
 use reqwest::header;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
-pub mod args;
+use tx3_tir::interop::json as interop;
 
-pub use args::ArgValue;
+pub use interop::ArgValue;
 
-use crate::trp::args::BytesEnvelope;
+use interop::BytesEnvelope;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SearchSpaceDiagnostic {
-    pub matched: Vec<String>,
-    pub by_address_count: Option<usize>,
-    pub by_asset_class_count: Option<usize>,
-    pub by_ref_count: Option<usize>,
-}
+use crate::trp::spec::{
+    InputNotResolvedDiagnostic, MissingTxArgDiagnostic, ResolveParams, SubmitParams,
+    SubmitResponse, SubmitWitness, TirInfo, TxEnvelope, TxScriptFailureDiagnostic,
+    UnsupportedTirDiagnostic,
+};
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InputQueryDiagnostic {
-    pub address: Option<String>,
-    pub min_amount: HashMap<String, String>,
-    pub refs: Vec<String>,
-    pub support_many: bool,
-    pub collateral: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, Error)]
-#[error("input `{name}` not resolved")]
-pub struct InputNotResolvedDiagnostic {
-    pub name: String,
-    pub query: InputQueryDiagnostic,
-    pub search_space: SearchSpaceDiagnostic,
-}
-
-#[derive(Debug, Serialize, Deserialize, Error)]
-#[error("TIR version {provided} is not supported, expected {expected}")]
-pub struct UnsupportedTirDiagnostic {
-    pub provided: String,
-    pub expected: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Error)]
-#[error("tx script returned failure")]
-pub struct TxScriptFailureDiagnostic {
-    pub logs: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Error)]
-#[error("missing argument `{key}` of type {ty}")]
-pub struct MissingTxArgDiagnostic {
-    pub key: String,
-    #[serde(rename = "type")]
-    pub ty: String,
-}
+mod spec;
 
 // Custom error type for TRP operations
 #[derive(Debug, Error)]
@@ -75,7 +37,7 @@ pub enum Error {
     #[error("Unknown error: {0}")]
     UnknownError(String),
 
-    #[error(transparent)]
+    #[error("TIR version {provided} is not supported, expected {expected}", provided = .0.provided, expected = .0.expected)]
     UnsupportedTir(UnsupportedTirDiagnostic),
 
     #[error("invalid TIR envelope")]
@@ -90,13 +52,13 @@ pub enum Error {
     #[error("node can't resolve txs while running at era {era}")]
     UnsupportedEra { era: String },
 
-    #[error(transparent)]
+    #[error("missing argument `{key}` of type {ty}", key = .0.key, ty = .0.ty)]
     MissingTxArg(MissingTxArgDiagnostic),
 
-    #[error(transparent)]
+    #[error("input `{name}` not resolved", name = .0.name)]
     InputNotResolved(InputNotResolvedDiagnostic),
 
-    #[error(transparent)]
+    #[error("tx script returned failure")]
     TxScriptFailure(TxScriptFailureDiagnostic),
 }
 
@@ -142,43 +104,6 @@ impl From<JsonRpcError> for Error {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TirInfo {
-    pub version: String,
-    pub bytecode: String,
-    pub encoding: String, // "base64" | "hex" | other
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VKeyWitness {
-    pub key: args::BytesEnvelope,
-    pub signature: args::BytesEnvelope,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum SubmitWitness {
-    #[serde(rename = "vkey")]
-    VKey(VKeyWitness),
-}
-
-#[derive(Deserialize, Debug, Serialize)]
-pub struct SubmitParams {
-    pub tx: args::BytesEnvelope,
-    pub witnesses: Vec<SubmitWitness>,
-}
-
-#[derive(Deserialize, Debug, Serialize)]
-pub struct SubmitResponse {
-    pub hash: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TxEnvelope {
-    pub tx: String,
-    pub hash: String,
-}
-
 #[derive(Debug, Clone)]
 pub struct ClientOptions {
     pub endpoint: String,
@@ -217,6 +142,12 @@ pub struct Client {
 pub struct ProtoTxRequest {
     pub tir: TirInfo,
     pub args: HashMap<String, ArgValue>,
+}
+
+fn to_json_arg_map(args: HashMap<String, ArgValue>) -> HashMap<String, Value> {
+    args.into_iter()
+        .map(|(k, v)| (k, interop::to_json(v)))
+        .collect()
 }
 
 impl Client {
@@ -292,11 +223,13 @@ impl Client {
     }
 
     pub async fn resolve(&self, proto_tx: ProtoTxRequest) -> Result<TxEnvelope, Error> {
-        let params = json!({
-            "tir": proto_tx.tir,
-            "args": HashMap::<String, serde_json::Value>::from_iter(proto_tx.args.into_iter().map(|(k, v)| (k, args::to_json(v)))),
-            "env": self.options.env_args,
-        });
+        let params = ResolveParams {
+            tir: proto_tx.tir,
+            args: to_json_arg_map(proto_tx.args),
+            env: to_json_arg_map(self.options.env_args.clone().unwrap_or_default()),
+        };
+
+        let params = serde_json::to_value(params).unwrap();
 
         let response = self.call("trp.resolve", params).await?;
 
@@ -312,11 +245,12 @@ impl Client {
         tx: TxEnvelope,
         witnesses: Vec<SubmitWitness>,
     ) -> Result<SubmitResponse, Error> {
-        let params = serde_json::to_value(SubmitParams {
+        let params = SubmitParams {
             tx: BytesEnvelope::from_hex(&tx.tx).unwrap(),
             witnesses,
-        })
-        .unwrap();
+        };
+
+        let params = serde_json::to_value(params).unwrap();
 
         let response = self.call("trp.submit", params).await?;
 
