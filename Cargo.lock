@@ -1112,7 +1112,7 @@ dependencies = [
 [[package]]
 name = "tx3-tir"
 version = "0.13.0"
-source = "git+https://github.com/tx3-lang/tx3.git#b70f6433bd8cc51d4e9bd78aec856c00d3599ce6"
+source = "git+https://github.com/tx3-lang/tx3.git#ac15a21145ff1385d4a6a1626b32cd5177ce1189"
 dependencies = [
  "base64",
  "bech32",

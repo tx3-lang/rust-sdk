@@ -1,11 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
-use tx3_tir::{
-    model::v1beta0::{self as tir, UtxoSet},
-    reduce::ArgValue,
-};
+use tx3_tir::{interop::json::TirEnvelope, model::v1beta0, reduce::ArgValue};
 
 use crate::tii::spec::Environment;
 
@@ -54,11 +51,11 @@ impl Protocol {
         Self::from_string(code)
     }
 
-    fn load_tx(&self, key: &str) -> Result<tir::Tx, Error> {
+    fn load_tx(&self, key: &str) -> Result<v1beta0::Tx, Error> {
         let tx = self.spec.transactions.get(key);
         let tx = tx.ok_or(Error::UnknownTx(key.to_string()))?;
 
-        let tx = tir::Tx::try_from(tx.tir.clone())?;
+        let tx = v1beta0::Tx::try_from(tx.tir.clone())?;
 
         Ok(tx)
     }
@@ -73,30 +70,39 @@ impl Protocol {
         Ok(env.clone())
     }
 
-    pub fn invoke(&self, tx: &str, env: &str) -> Result<Invocation, Error> {
+    pub fn invoke(&self, tx: &str, env: Option<&str>) -> Result<Invocation, Error> {
         let tx = self.load_tx(tx)?;
-        let env = self.ensure_env(env)?;
-        Ok(Invocation::new(tx.clone(), env.clone()))
+
+        let env = match env {
+            Some(x) => self.ensure_env(x)?,
+            None => Environment::default(),
+        };
+
+        Ok(Invocation::new(tx.clone(), env))
+    }
+
+    pub fn txs(&self) -> &HashMap<String, spec::Transaction> {
+        &self.spec.transactions
     }
 }
 
-pub type ParamMap = BTreeMap<String, tir::Type>;
-pub type QueryMap = BTreeMap<String, tir::InputQuery>;
+pub type ParamMap = BTreeMap<String, v1beta0::Type>;
+pub type QueryMap = BTreeMap<String, v1beta0::InputQuery>;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Invocation {
-    prototype: tir::Tx,
+    prototype: v1beta0::Tx,
     env: Environment,
     args: BTreeMap<String, ArgValue>,
-    inputs: BTreeMap<String, UtxoSet>,
+    inputs: BTreeMap<String, v1beta0::UtxoSet>,
     fees: Option<u64>,
 
     // Finalized tx
-    tx: Option<tir::Tx>,
+    tx: Option<v1beta0::Tx>,
 }
 
 impl Invocation {
-    pub fn new(prototype: tir::Tx, env: Environment) -> Self {
+    pub fn new(prototype: v1beta0::Tx, env: Environment) -> Self {
         Self {
             prototype,
             env,
@@ -127,7 +133,7 @@ impl Invocation {
         self.tx = None;
     }
 
-    fn ensure_finalized(&mut self) -> Result<&tir::Tx, Error> {
+    fn ensure_finalized(&mut self) -> Result<&v1beta0::Tx, Error> {
         if self.tx.is_none() {
             self.finalize()?;
         }
@@ -152,13 +158,24 @@ impl Invocation {
         self.clear_finalized();
     }
 
+    pub fn set_args(&mut self, args: HashMap<String, ArgValue>) {
+        self.args.extend(args);
+        self.clear_finalized();
+    }
+
     pub fn with_arg(mut self, name: &str, value: ArgValue) -> Self {
         self.args.insert(name.to_lowercase().to_string(), value);
         self.clear_finalized();
         self
     }
 
-    pub fn set_input(&mut self, name: &str, value: UtxoSet) {
+    pub fn with_args(mut self, args: HashMap<String, ArgValue>) -> Self {
+        self.args.extend(args);
+        self.clear_finalized();
+        self
+    }
+
+    pub fn set_input(&mut self, name: &str, value: v1beta0::UtxoSet) {
         self.inputs.insert(name.to_lowercase().to_string(), value);
         self.clear_finalized();
     }
@@ -168,9 +185,30 @@ impl Invocation {
         self.clear_finalized();
     }
 
-    pub fn into_tir(mut self) -> Result<tir::Tx, Error> {
+    pub fn into_tir(mut self) -> Result<v1beta0::Tx, Error> {
         self.ensure_finalized()?;
         Ok(self.tx.take().unwrap())
+    }
+
+    pub fn into_trp_request(self) -> Result<crate::trp::ProtoTxRequest, Error> {
+        let args = self
+            .args
+            .clone()
+            .into_iter()
+            .map(|(k, v)| (k, v.into()))
+            .collect();
+
+        let tx = self.into_tir()?;
+
+        let content = tx3_tir::interop::to_vec(&tx);
+
+        let tir = TirEnvelope {
+            content: hex::encode(content),
+            encoding: tx3_tir::interop::json::BytesEncoding::Hex,
+            version: "v1beta0".to_string(),
+        };
+
+        Ok(crate::trp::ProtoTxRequest { tir, args })
     }
 }
 
@@ -189,7 +227,9 @@ mod tests {
 
         let protocol = Protocol::from_file(&tii).unwrap();
 
-        let invoke = protocol.invoke("transfer", "cardano-preview").unwrap();
+        let invoke = protocol
+            .invoke("transfer", Some("cardano-preview"))
+            .unwrap();
 
         let mut invoke = invoke
             .with_arg("sender", ArgValue::Address(b"sender".to_vec()))
@@ -197,8 +237,8 @@ mod tests {
 
         invoke.set_input(
             "source",
-            HashSet::from([tir::Utxo {
-                r#ref: tir::UtxoRef {
+            HashSet::from([v1beta0::Utxo {
+                r#ref: v1beta0::UtxoRef {
                     txid: b"fafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafa"
                         .to_vec(),
                     index: 0,
@@ -206,7 +246,7 @@ mod tests {
                 address: b"abababa".to_vec(),
                 datum: None,
                 assets: CanonicalAssets::from_defined_asset(b"abababa", b"asset", 100),
-                script: Some(tir::Expression::Bytes(b"abce".to_vec())),
+                script: Some(v1beta0::Expression::Bytes(b"abce".to_vec())),
             }]),
         );
 

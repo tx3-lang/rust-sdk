@@ -30,7 +30,7 @@ pub use interop::ArgValue;
 
 use interop::BytesEnvelope;
 
-use crate::trp::spec::{
+pub use crate::trp::spec::{
     InputNotResolvedDiagnostic, MissingTxArgDiagnostic, ResolveParams, SubmitParams,
     SubmitResponse, SubmitWitness, TirInfo, TxEnvelope, TxScriptFailureDiagnostic,
     UnsupportedTirDiagnostic,

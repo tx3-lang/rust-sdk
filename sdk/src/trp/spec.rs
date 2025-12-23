@@ -17,15 +17,7 @@ pub struct TxEnvelope {
     pub tx: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TirInfo {
-    #[serde(rename = "bytecode")]
-    pub bytecode: String,
-    #[serde(rename = "encoding")]
-    pub encoding: String,
-    #[serde(rename = "version")]
-    pub version: String,
-}
+pub type TirInfo = tx3_tir::interop::json::TirEnvelope;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubmitResponse {
