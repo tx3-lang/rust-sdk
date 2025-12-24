@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use tx3_tir::{interop::json::TirEnvelope, model::v1beta0, reduce::ArgValue};
 
-use crate::tii::spec::Environment;
+use crate::tii::spec::Profile;
 
 pub mod spec;
 
@@ -19,8 +19,8 @@ pub enum Error {
     #[error("unknown tx: {0}")]
     UnknownTx(String),
 
-    #[error("unknown environment: {0}")]
-    UnknownEnvironment(String),
+    #[error("unknown profile: {0}")]
+    UnknownProfile(String),
 
     #[error(transparent)]
     ReduceError(#[from] tx3_tir::reduce::Error),
@@ -60,25 +60,25 @@ impl Protocol {
         Ok(tx)
     }
 
-    fn ensure_env(&self, key: &str) -> Result<Environment, Error> {
+    fn ensure_profile(&self, key: &str) -> Result<Profile, Error> {
         let env = self
             .spec
-            .environments
+            .profiles
             .get(key)
-            .ok_or_else(|| Error::UnknownEnvironment(key.to_string()))?;
+            .ok_or_else(|| Error::UnknownProfile(key.to_string()))?;
 
         Ok(env.clone())
     }
 
-    pub fn invoke(&self, tx: &str, env: Option<&str>) -> Result<Invocation, Error> {
+    pub fn invoke(&self, tx: &str, profile: Option<&str>) -> Result<Invocation, Error> {
         let tx = self.load_tx(tx)?;
 
-        let env = match env {
-            Some(x) => self.ensure_env(x)?,
-            None => Environment::default(),
+        let profile = match profile {
+            Some(x) => self.ensure_profile(x)?,
+            None => Profile::default(),
         };
 
-        Ok(Invocation::new(tx.clone(), env))
+        Ok(Invocation::new(tx.clone(), profile))
     }
 
     pub fn txs(&self) -> &HashMap<String, spec::Transaction> {
@@ -92,7 +92,7 @@ pub type QueryMap = BTreeMap<String, v1beta0::InputQuery>;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Invocation {
     prototype: v1beta0::Tx,
-    env: Environment,
+    profile: Profile,
     args: BTreeMap<String, ArgValue>,
     inputs: BTreeMap<String, v1beta0::UtxoSet>,
     fees: Option<u64>,
@@ -102,10 +102,10 @@ pub struct Invocation {
 }
 
 impl Invocation {
-    pub fn new(prototype: v1beta0::Tx, env: Environment) -> Self {
+    pub fn new(prototype: v1beta0::Tx, profile: Profile) -> Self {
         Self {
             prototype,
-            env,
+            profile,
             args: BTreeMap::new(),
             inputs: BTreeMap::new(),
             fees: None,
@@ -221,15 +221,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn happy_path() {
+    fn happy_path_smoke_test() {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let tii = format!("{manifest_dir}/../examples/transfer.tii.json");
 
         let protocol = Protocol::from_file(&tii).unwrap();
 
-        let invoke = protocol
-            .invoke("transfer", Some("cardano-preview"))
-            .unwrap();
+        let invoke = protocol.invoke("transfer", Some("preview")).unwrap();
 
         let mut invoke = invoke
             .with_arg("sender", ArgValue::Address(b"sender".to_vec()))

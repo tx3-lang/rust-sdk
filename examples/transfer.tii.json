@@ -1,15 +1,24 @@
 {
+    "profiles": {
+        "preview": {
+            "environment": {
+                "xyz": "abc"
+            }
+        }
+    },
+    "protocol": {
+        "environment": {
+            "properties": {},
+            "required": [],
+            "type": "object"
+        },
+        "name": "transfer",
+        "scope": "tx3-examples",
+        "version": "0.0.1"
+    },
     "tii": {
         "version": "v1beta0"
     },
-    "protocol": {
-        "name": "transfer",
-        "version": "1.0.0"
-    },
-    "environments": {
-        "cardano-preview": {}
-    },
-    "components": {},
     "transactions": {
         "transfer": {
             "params": {

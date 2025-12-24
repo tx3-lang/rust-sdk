@@ -8,10 +8,10 @@ pub struct TiiFile {
     pub tii: TiiInfo,
     pub protocol: Protocol,
     pub transactions: HashMap<String, Transaction>,
-    #[serde(default = "HashMap::new")]
-    pub environments: HashMap<String, Environment>,
-    #[serde(default)]
-    pub components: Components,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub profiles: HashMap<String, Profile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub components: Option<Components>,
 }
 
 /// TII version information
@@ -23,10 +23,13 @@ pub struct TiiInfo {
 /// Protocol metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Protocol {
+    pub scope: String,
     pub name: String,
     pub version: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Schema>,
 }
 
 /// Transaction definition
@@ -40,24 +43,15 @@ pub struct Transaction {
 
 /// Environment definition
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct Environment {
+pub struct Profile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(default)]
-    pub defaults: Option<EnvironmentDefaults>,
-}
-
-/// Environment defaults
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EnvironmentDefaults {
-    pub schema: Schema,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub defaults: Option<serde_json::Value>,
+    pub environment: serde_json::Value,
 }
 
 /// Components section containing schemas and other components
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Components {
-    #[serde(default = "HashMap::new")]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub schemas: HashMap<String, Schema>,
 }
