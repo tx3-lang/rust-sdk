@@ -1,6 +1,6 @@
 use schemars::schema::{InstanceType, Schema, SingleOrVec};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use thiserror::Error;
 
 use crate::{
@@ -83,7 +83,9 @@ impl Protocol {
             None => ArgMap::new(),
         };
 
-        Ok(Invocation::new(tx.clone(), env))
+        let parties = self.spec.parties.keys().cloned().collect();
+
+        Ok(Invocation::new(tx.clone(), env, parties))
     }
 
     pub fn txs(&self) -> &HashMap<String, spec::Transaction> {
@@ -142,6 +144,7 @@ pub type QueryMap = BTreeMap<String, InputQuery>;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Invocation {
     prototype: Transaction,
+    parties: HashSet<String>,
     args: ArgMap,
     // TODO: support explicit input specification
     // input_override: HashMap<String, v1beta0::UtxoSet>,
@@ -151,16 +154,23 @@ pub struct Invocation {
 }
 
 impl Invocation {
-    pub fn new(prototype: Transaction, env: ArgMap) -> Self {
+    pub fn new(prototype: Transaction, env: ArgMap, parties: HashSet<String>) -> Self {
         Self {
             prototype,
             // we initialize the args with the environment
             args: env,
+            parties,
         }
     }
 
     pub fn params(&mut self) -> Result<ParamMap, Error> {
-        let schema = self
+        let mut out = HashMap::new();
+
+        for party in self.parties.iter() {
+            out.insert(party.to_lowercase(), ParamType::Address);
+        }
+
+        let tx_params = self
             .prototype
             .params
             .clone()
@@ -168,14 +178,11 @@ impl Invocation {
             .object
             .ok_or(Error::InvalidParamsSchema)?;
 
-        // iterate over the properties and convert them to ParamType
-        let mut params = HashMap::new();
-
-        for (key, value) in schema.properties {
-            params.insert(key, ParamType::from_json_schema(value)?);
+        for (key, value) in tx_params.properties {
+            out.insert(key, ParamType::from_json_schema(value)?);
         }
 
-        Ok(params)
+        Ok(out)
     }
 
     pub fn set_arg(&mut self, name: &str, value: serde_json::Value) {

@@ -9,6 +9,10 @@ use crate::core::TirEnvelope;
 pub struct TiiFile {
     pub tii: TiiInfo,
     pub protocol: Protocol,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<Schema>,
+    #[serde(default)]
+    pub parties: HashMap<String, Party>,
     pub transactions: HashMap<String, Transaction>,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub profiles: HashMap<String, Profile>,
@@ -30,8 +34,6 @@ pub struct Protocol {
     pub version: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub environment: Option<Schema>,
 }
 
 /// Transaction definition
@@ -41,6 +43,11 @@ pub struct Transaction {
     pub description: Option<String>,
     pub tir: TirEnvelope,
     pub params: Schema,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Party {
+    pub description: Option<String>,
 }
 
 /// Environment definition

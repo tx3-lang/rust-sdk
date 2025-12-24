@@ -1,4 +1,17 @@
 {
+    "environment": {
+        "properties": {
+            "xyz": {
+                "type": "string"
+            }
+        },
+        "required": [],
+        "type": "object"
+    },
+    "parties": {
+        "Receiver": {},
+        "Sender": {}
+    },
     "profiles": {
         "preview": {
             "environment": {
@@ -7,15 +20,6 @@
         }
     },
     "protocol": {
-        "environment": {
-            "properties": {
-                "xyz": {
-                    "type": "string"
-                }
-            },
-            "required": [],
-            "type": "object"
-        },
         "name": "transfer",
         "scope": "tx3-examples",
         "version": "0.0.1"
@@ -29,18 +33,10 @@
                 "properties": {
                     "quantity": {
                         "type": "integer"
-                    },
-                    "receiver": {
-                        "$ref": "https://tx3.land/specs/v1beta0/core#Address"
-                    },
-                    "sender": {
-                        "$ref": "https://tx3.land/specs/v1beta0/core#Address"
                     }
                 },
                 "required": [
-                    "quantity",
-                    "receiver",
-                    "sender"
+                    "quantity"
                 ],
                 "type": "object"
             },
