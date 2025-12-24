@@ -8,12 +8,16 @@
     },
     "protocol": {
         "environment": {
-            "properties": {},
+            "properties": {
+                "xyz": {
+                    "type": "string"
+                }
+            },
             "required": [],
             "type": "object"
         },
-        "name": "unknown",
-        "scope": "unknown",
+        "name": "transfer",
+        "scope": "tx3-examples",
         "version": "0.0.1"
     },
     "tii": {

@@ -182,7 +182,7 @@ impl Invocation {
         self.args.insert(name.to_lowercase().to_string(), value);
     }
 
-    pub fn set_args(&mut self, args: HashMap<String, serde_json::Value>) {
+    pub fn set_args(&mut self, args: ArgMap) {
         self.args.extend(args);
     }
 
@@ -191,7 +191,7 @@ impl Invocation {
         self
     }
 
-    pub fn with_args(mut self, args: HashMap<String, serde_json::Value>) -> Self {
+    pub fn with_args(mut self, args: ArgMap) -> Self {
         self.args.extend(args);
         self
     }
