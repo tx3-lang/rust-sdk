@@ -2,7 +2,7 @@
     "profiles": {
         "preview": {
             "environment": {
-                "xyz": "abc"
+                "xyz": "abc123"
             }
         }
     },
@@ -12,8 +12,8 @@
             "required": [],
             "type": "object"
         },
-        "name": "transfer",
-        "scope": "tx3-examples",
+        "name": "unknown",
+        "scope": "unknown",
         "version": "0.0.1"
     },
     "tii": {
@@ -27,10 +27,10 @@
                         "type": "integer"
                     },
                     "receiver": {
-                        "type": "string"
+                        "$ref": "https://tx3.land/specs/v1beta0/core#Address"
                     },
                     "sender": {
-                        "type": "string"
+                        "$ref": "https://tx3.land/specs/v1beta0/core#Address"
                     }
                 },
                 "required": [

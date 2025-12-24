@@ -24,16 +24,10 @@ use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
-use tx3_tir::interop::json as interop;
-
-pub use interop::ArgValue;
-
-use interop::BytesEnvelope;
-
+use crate::core::BytesEnvelope;
 pub use crate::trp::spec::{
     InputNotResolvedDiagnostic, MissingTxArgDiagnostic, ResolveParams, SubmitParams,
-    SubmitResponse, SubmitWitness, TirInfo, TxEnvelope, TxScriptFailureDiagnostic,
-    UnsupportedTirDiagnostic,
+    SubmitResponse, SubmitWitness, TxEnvelope, TxScriptFailureDiagnostic, UnsupportedTirDiagnostic,
 };
 
 mod spec;
@@ -127,7 +121,6 @@ impl From<JsonRpcError> for Error {
 pub struct ClientOptions {
     pub endpoint: String,
     pub headers: Option<HashMap<String, String>>,
-    pub env_args: Option<HashMap<String, ArgValue>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,17 +149,6 @@ struct JsonRpcError {
 pub struct Client {
     options: ClientOptions,
     client: reqwest::Client,
-}
-
-pub struct ProtoTxRequest {
-    pub tir: TirInfo,
-    pub args: HashMap<String, ArgValue>,
-}
-
-fn to_json_arg_map(args: HashMap<String, ArgValue>) -> HashMap<String, Value> {
-    args.into_iter()
-        .map(|(k, v)| (k, interop::to_json(v)))
-        .collect()
 }
 
 impl Client {
@@ -241,14 +223,8 @@ impl Client {
             .ok_or_else(|| Error::UnknownError("No result in response".to_string()))
     }
 
-    pub async fn resolve(&self, proto_tx: ProtoTxRequest) -> Result<TxEnvelope, Error> {
-        let params = ResolveParams {
-            tir: proto_tx.tir,
-            args: to_json_arg_map(proto_tx.args),
-            env: to_json_arg_map(self.options.env_args.clone().unwrap_or_default()),
-        };
-
-        let params = serde_json::to_value(params).unwrap();
+    pub async fn resolve(&self, request: ResolveParams) -> Result<TxEnvelope, Error> {
+        let params = serde_json::to_value(request).unwrap();
 
         let response = self.call("trp.resolve", params).await?;
 
@@ -259,17 +235,8 @@ impl Client {
         Ok(out)
     }
 
-    pub async fn submit(
-        &self,
-        tx: TxEnvelope,
-        witnesses: Vec<SubmitWitness>,
-    ) -> Result<SubmitResponse, Error> {
-        let params = SubmitParams {
-            tx: BytesEnvelope::from_hex(&tx.tx).unwrap(),
-            witnesses,
-        };
-
-        let params = serde_json::to_value(params).unwrap();
+    pub async fn submit(&self, request: SubmitParams) -> Result<SubmitResponse, Error> {
+        let params = serde_json::to_value(request).unwrap();
 
         let response = self.call("trp.submit", params).await?;
 

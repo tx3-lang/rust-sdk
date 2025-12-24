@@ -1,10 +1,12 @@
+use schemars::schema::{InstanceType, Schema, SingleOrVec};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
-use tx3_tir::{interop::json::TirEnvelope, model::v1beta0, reduce::ArgValue};
-
-use crate::tii::spec::Profile;
+use crate::{
+    core::ArgMap,
+    tii::spec::{Profile, Transaction},
+};
 
 pub mod spec;
 
@@ -22,11 +24,11 @@ pub enum Error {
     #[error("unknown profile: {0}")]
     UnknownProfile(String),
 
-    #[error(transparent)]
-    ReduceError(#[from] tx3_tir::reduce::Error),
+    #[error("invalid params schema")]
+    InvalidParamsSchema,
 
-    #[error(transparent)]
-    InteropError(#[from] tx3_tir::interop::Error),
+    #[error("invalid param type")]
+    InvalidParamType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,34 +53,37 @@ impl Protocol {
         Self::from_string(code)
     }
 
-    fn load_tx(&self, key: &str) -> Result<v1beta0::Tx, Error> {
+    fn ensure_tx(&self, key: &str) -> Result<&Transaction, Error> {
         let tx = self.spec.transactions.get(key);
         let tx = tx.ok_or(Error::UnknownTx(key.to_string()))?;
-
-        let tx = v1beta0::Tx::try_from(tx.tir.clone())?;
 
         Ok(tx)
     }
 
-    fn ensure_profile(&self, key: &str) -> Result<Profile, Error> {
+    fn ensure_profile(&self, key: &str) -> Result<&Profile, Error> {
         let env = self
             .spec
             .profiles
             .get(key)
             .ok_or_else(|| Error::UnknownProfile(key.to_string()))?;
 
-        Ok(env.clone())
+        Ok(env)
     }
 
     pub fn invoke(&self, tx: &str, profile: Option<&str>) -> Result<Invocation, Error> {
-        let tx = self.load_tx(tx)?;
+        let tx = self.ensure_tx(tx)?;
 
         let profile = match profile {
             Some(x) => self.ensure_profile(x)?,
-            None => Profile::default(),
+            None => &Profile::default(),
         };
 
-        Ok(Invocation::new(tx.clone(), profile))
+        let env = match profile.environment.as_object() {
+            Some(as_object) => as_object.clone(),
+            None => ArgMap::new(),
+        };
+
+        Ok(Invocation::new(tx.clone(), env))
     }
 
     pub fn txs(&self) -> &HashMap<String, spec::Transaction> {
@@ -86,111 +91,112 @@ impl Protocol {
     }
 }
 
-pub type ParamMap = BTreeMap<String, v1beta0::Type>;
-pub type QueryMap = BTreeMap<String, v1beta0::InputQuery>;
+#[derive(Debug)]
+pub enum ParamType {
+    Bytes,
+    Integer,
+    Boolean,
+    UtxoRef,
+    Address,
+    List(Box<ParamType>),
+    Custom(Schema),
+}
+
+impl ParamType {
+    fn from_json_type(instance_type: InstanceType) -> Result<ParamType, Error> {
+        match instance_type {
+            InstanceType::Integer => Ok(ParamType::Integer),
+            InstanceType::Boolean => Ok(ParamType::Boolean),
+            _ => Err(Error::InvalidParamType),
+        }
+    }
+
+    pub fn from_json_schema(schema: Schema) -> Result<ParamType, Error> {
+        let as_object = schema.into_object();
+
+        if let Some(reference) = &as_object.reference {
+            return match reference.as_str() {
+                "https://tx3.land/specs/v1beta0/core#Bytes" => Ok(ParamType::Bytes),
+                "https://tx3.land/specs/v1beta0/core#Address" => Ok(ParamType::Address),
+                "https://tx3.land/specs/v1beta0/core#UtxoRef" => Ok(ParamType::UtxoRef),
+                _ => Err(Error::InvalidParamType),
+            };
+        }
+
+        if let Some(inner) = as_object.instance_type {
+            return match inner {
+                SingleOrVec::Single(x) => Self::from_json_type(*x),
+                SingleOrVec::Vec(_) => Err(Error::InvalidParamType),
+            };
+        }
+
+        Err(Error::InvalidParamType)
+    }
+}
+
+pub struct InputQuery {}
+
+pub type ParamMap = HashMap<String, ParamType>;
+pub type QueryMap = BTreeMap<String, InputQuery>;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Invocation {
-    prototype: v1beta0::Tx,
-    profile: Profile,
-    args: BTreeMap<String, ArgValue>,
-    inputs: BTreeMap<String, v1beta0::UtxoSet>,
-    fees: Option<u64>,
+    prototype: Transaction,
+    args: ArgMap,
+    // TODO: support explicit input specification
+    // input_override: HashMap<String, v1beta0::UtxoSet>,
 
-    // Finalized tx
-    tx: Option<v1beta0::Tx>,
+    // TODO: support explicit fee specification
+    // fee_override: Option<u64>,
 }
 
 impl Invocation {
-    pub fn new(prototype: v1beta0::Tx, profile: Profile) -> Self {
+    pub fn new(prototype: Transaction, env: ArgMap) -> Self {
         Self {
             prototype,
-            profile,
-            args: BTreeMap::new(),
-            inputs: BTreeMap::new(),
-            fees: None,
-            tx: None,
+            // we initialize the args with the environment
+            args: env,
         }
     }
 
-    fn finalize(&mut self) -> Result<(), Error> {
-        let mut tx = self.prototype.clone();
-        tx = tx3_tir::reduce::apply_args(tx, &self.args)?;
-        tx = tx3_tir::reduce::apply_inputs(tx, &self.inputs)?;
+    pub fn params(&mut self) -> Result<ParamMap, Error> {
+        let schema = self
+            .prototype
+            .params
+            .clone()
+            .into_object()
+            .object
+            .ok_or(Error::InvalidParamsSchema)?;
 
-        if let Some(fees) = self.fees {
-            tx = tx3_tir::reduce::apply_fees(tx, fees)?;
+        // iterate over the properties and convert them to ParamType
+        let mut params = HashMap::new();
+
+        for (key, value) in schema.properties {
+            params.insert(key, ParamType::from_json_schema(value)?);
         }
 
-        tx = tx3_tir::reduce::reduce(tx)?;
-
-        self.tx = Some(tx);
-
-        Ok(())
-    }
-
-    fn clear_finalized(&mut self) {
-        self.tx = None;
-    }
-
-    fn ensure_finalized(&mut self) -> Result<&v1beta0::Tx, Error> {
-        if self.tx.is_none() {
-            self.finalize()?;
-        }
-
-        Ok(self.tx.as_ref().unwrap())
-    }
-
-    pub fn define_params(&mut self) -> Result<ParamMap, Error> {
-        let tx = self.ensure_finalized()?;
-        let params = tx3_tir::reduce::find_params(tx);
         Ok(params)
     }
 
-    pub fn define_queries(&mut self) -> Result<QueryMap, Error> {
-        let tx = self.ensure_finalized()?;
-        let queries = tx3_tir::reduce::find_queries(tx);
-        Ok(queries)
-    }
-
-    pub fn set_arg(&mut self, name: &str, value: ArgValue) {
+    pub fn set_arg(&mut self, name: &str, value: serde_json::Value) {
         self.args.insert(name.to_lowercase().to_string(), value);
-        self.clear_finalized();
     }
 
-    pub fn set_args(&mut self, args: HashMap<String, ArgValue>) {
+    pub fn set_args(&mut self, args: HashMap<String, serde_json::Value>) {
         self.args.extend(args);
-        self.clear_finalized();
     }
 
-    pub fn with_arg(mut self, name: &str, value: ArgValue) -> Self {
+    pub fn with_arg(mut self, name: &str, value: serde_json::Value) -> Self {
         self.args.insert(name.to_lowercase().to_string(), value);
-        self.clear_finalized();
         self
     }
 
-    pub fn with_args(mut self, args: HashMap<String, ArgValue>) -> Self {
+    pub fn with_args(mut self, args: HashMap<String, serde_json::Value>) -> Self {
         self.args.extend(args);
-        self.clear_finalized();
         self
     }
 
-    pub fn set_input(&mut self, name: &str, value: v1beta0::UtxoSet) {
-        self.inputs.insert(name.to_lowercase().to_string(), value);
-        self.clear_finalized();
-    }
-
-    pub fn set_fees(&mut self, value: u64) {
-        self.fees = Some(value);
-        self.clear_finalized();
-    }
-
-    pub fn into_tir(mut self) -> Result<v1beta0::Tx, Error> {
-        self.ensure_finalized()?;
-        Ok(self.tx.take().unwrap())
-    }
-
-    pub fn into_trp_request(self) -> Result<crate::trp::ProtoTxRequest, Error> {
+    pub fn into_resolve_request(self) -> Result<crate::trp::ResolveParams, Error> {
         let args = self
             .args
             .clone()
@@ -198,25 +204,16 @@ impl Invocation {
             .map(|(k, v)| (k, v.into()))
             .collect();
 
-        let tx = self.into_tir()?;
+        let tir = self.prototype.tir.clone();
 
-        let content = tx3_tir::interop::to_vec(&tx);
-
-        let tir = TirEnvelope {
-            content: hex::encode(content),
-            encoding: tx3_tir::interop::json::BytesEncoding::Hex,
-            version: "v1beta0".to_string(),
-        };
-
-        Ok(crate::trp::ProtoTxRequest { tir, args })
+        Ok(crate::trp::ResolveParams { tir, args })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
 
-    use tx3_tir::model::assets::CanonicalAssets;
+    use serde_json::json;
 
     use super::*;
 
@@ -230,28 +227,13 @@ mod tests {
         let invoke = protocol.invoke("transfer", Some("preview")).unwrap();
 
         let mut invoke = invoke
-            .with_arg("sender", ArgValue::Address(b"sender".to_vec()))
-            .with_arg("quantity", ArgValue::Int(100_000_000));
+            .with_arg("sender", json!("addr1abc"))
+            .with_arg("quantity", json!(100_000_000));
 
-        invoke.set_input(
-            "source",
-            HashSet::from([v1beta0::Utxo {
-                r#ref: v1beta0::UtxoRef {
-                    txid: b"fafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafa"
-                        .to_vec(),
-                    index: 0,
-                },
-                address: b"abababa".to_vec(),
-                datum: None,
-                assets: CanonicalAssets::from_defined_asset(b"abababa", b"asset", 100),
-                script: Some(v1beta0::Expression::Bytes(b"abce".to_vec())),
-            }]),
-        );
+        dbg!(&invoke.params().unwrap());
 
-        dbg!(&invoke.define_params().unwrap());
-        dbg!(&invoke.define_queries().unwrap());
+        let tx = invoke.into_resolve_request().unwrap();
 
-        let tx = invoke.into_tir().unwrap();
         dbg!(&tx);
     }
 }

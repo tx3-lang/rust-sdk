@@ -2,6 +2,8 @@ use schemars::schema::Schema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::core::TirEnvelope;
+
 /// Root structure for TII (Transaction Invocation Interface) JSON files
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TiiFile {
@@ -37,7 +39,7 @@ pub struct Protocol {
 pub struct Transaction {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub tir: tx3_tir::interop::json::TirEnvelope,
+    pub tir: TirEnvelope,
     pub params: Schema,
 }
 
