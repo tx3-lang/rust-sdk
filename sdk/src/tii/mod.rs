@@ -1,5 +1,6 @@
 use schemars::schema::{InstanceType, Schema, SingleOrVec};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use thiserror::Error;
 
@@ -107,6 +108,10 @@ impl Protocol {
             if let Some(env) = profile.environment.as_object() {
                 let values = env.clone();
                 out.set_args(values);
+            }
+
+            for (key, value) in profile.parties.iter() {
+                out.set_arg(&key, json!(value));
             }
         }
 
@@ -245,16 +250,15 @@ mod tests {
 
         assert_eq!(all_params.len(), 5);
         assert!(all_params.contains(&"sender".to_string()));
-        assert!(all_params.contains(&"quantity".to_string()));
         assert!(all_params.contains(&"middleman".to_string()));
         assert!(all_params.contains(&"receiver".to_string()));
         assert!(all_params.contains(&"tax".to_string()));
+        assert!(all_params.contains(&"quantity".to_string()));
 
         let unspecified_params: HashSet<_> = invoke.unspecified_params().map(|(k, _)| k).collect();
 
-        assert_eq!(unspecified_params.len(), 2);
+        assert_eq!(unspecified_params.len(), 1);
         assert!(unspecified_params.contains(&"receiver".to_string()));
-        assert!(unspecified_params.contains(&"middleman".to_string()));
 
         let tx = invoke.into_resolve_request().unwrap();
 

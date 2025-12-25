@@ -21,8 +21,7 @@
                 "tax": "5000000"
             },
             "parties": {
-                "middleman": "addr1bbb",
-                "sender": "addr1aaa"
+                "middleman": "addr1bbb"
             }
         }
     },

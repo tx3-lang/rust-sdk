@@ -56,6 +56,8 @@ pub struct Profile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub environment: serde_json::Value,
+    #[serde(default)]
+    pub parties: HashMap<String, String>,
 }
 
 /// Components section containing schemas and other components
