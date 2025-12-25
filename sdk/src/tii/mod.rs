@@ -1,7 +1,7 @@
 use schemars::schema::{InstanceType, Schema, SingleOrVec};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
 use crate::{
@@ -228,6 +228,7 @@ impl Invocation {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
 
     use serde_json::json;
 

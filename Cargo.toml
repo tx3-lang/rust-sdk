@@ -15,6 +15,3 @@ homepage = "https://github.com/tx3-lang/rust-sdk"
 readme = "README.md"
 
 [workspace.dependencies]
-# tx3-tir = "^0"
-# tx3-tir = { version = "*", path = "../tx3/crates/tx3-tir" }
-tx3-tir = { git = "https://github.com/tx3-lang/tx3.git" }

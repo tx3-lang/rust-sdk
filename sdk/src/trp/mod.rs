@@ -12,7 +12,6 @@
 //! let client = Client::new(ClientOptions {
 //!     endpoint: "https://trp.example.com".to_string(),
 //!     headers: None,
-//!     env_args: None,
 //! });
 //! ```
 //!
@@ -24,7 +23,6 @@ use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::core::BytesEnvelope;
 pub use crate::trp::spec::{
     InputNotResolvedDiagnostic, MissingTxArgDiagnostic, ResolveParams, SubmitParams,
     SubmitResponse, SubmitWitness, TxEnvelope, TxScriptFailureDiagnostic, UnsupportedTirDiagnostic,
