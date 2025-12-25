@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use thiserror::Error;
 
 use crate::{
-    core::ArgMap,
+    core::{ArgMap, TirEnvelope},
     tii::spec::{Profile, Transaction},
 };
 
@@ -29,6 +29,18 @@ pub enum Error {
 
     #[error("invalid param type")]
     InvalidParamType,
+}
+
+fn params_from_schema(schema: Schema) -> Result<ParamMap, Error> {
+    let mut params = ParamMap::new();
+
+    let as_object = schema.into_object();
+
+    for (key, value) in as_object.object.unwrap().properties {
+        params.insert(key, ParamType::from_json_schema(value)?);
+    }
+
+    Ok(params)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,19 +85,32 @@ impl Protocol {
     pub fn invoke(&self, tx: &str, profile: Option<&str>) -> Result<Invocation, Error> {
         let tx = self.ensure_tx(tx)?;
 
-        let profile = match profile {
-            Some(x) => self.ensure_profile(x)?,
-            None => &Profile::default(),
+        let profile = profile.map(|x| self.ensure_profile(x)).transpose()?;
+
+        let mut out = Invocation {
+            tir: tx.tir.clone(),
+            params: ParamMap::new(),
+            args: ArgMap::new(),
         };
 
-        let env = match profile.environment.as_object() {
-            Some(as_object) => as_object.clone(),
-            None => ArgMap::new(),
-        };
+        for party in self.spec.parties.keys() {
+            out.params.insert(party.to_lowercase(), ParamType::Address);
+        }
 
-        let parties = self.spec.parties.keys().cloned().collect();
+        if let Some(env) = &self.spec.environment {
+            out.params.extend(params_from_schema(env.clone())?);
+        }
 
-        Ok(Invocation::new(tx.clone(), env, parties))
+        out.params.extend(params_from_schema(tx.params.clone())?);
+
+        if let Some(profile) = profile {
+            if let Some(env) = profile.environment.as_object() {
+                let values = env.clone();
+                out.set_args(values);
+            }
+        }
+
+        Ok(out)
     }
 
     pub fn txs(&self) -> &HashMap<String, spec::Transaction> {
@@ -93,7 +118,7 @@ impl Protocol {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ParamType {
     Bytes,
     Integer,
@@ -141,10 +166,10 @@ pub struct InputQuery {}
 pub type ParamMap = HashMap<String, ParamType>;
 pub type QueryMap = BTreeMap<String, InputQuery>;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Invocation {
-    prototype: Transaction,
-    parties: HashSet<String>,
+    tir: TirEnvelope,
+    params: ParamMap,
     args: ArgMap,
     // TODO: support explicit input specification
     // input_override: HashMap<String, v1beta0::UtxoSet>,
@@ -154,35 +179,14 @@ pub struct Invocation {
 }
 
 impl Invocation {
-    pub fn new(prototype: Transaction, env: ArgMap, parties: HashSet<String>) -> Self {
-        Self {
-            prototype,
-            // we initialize the args with the environment
-            args: env,
-            parties,
-        }
+    pub fn params(&mut self) -> &ParamMap {
+        &self.params
     }
 
-    pub fn params(&mut self) -> Result<ParamMap, Error> {
-        let mut out = HashMap::new();
-
-        for party in self.parties.iter() {
-            out.insert(party.to_lowercase(), ParamType::Address);
-        }
-
-        let tx_params = self
-            .prototype
-            .params
-            .clone()
-            .into_object()
-            .object
-            .ok_or(Error::InvalidParamsSchema)?;
-
-        for (key, value) in tx_params.properties {
-            out.insert(key, ParamType::from_json_schema(value)?);
-        }
-
-        Ok(out)
+    pub fn unspecified_params(&mut self) -> impl Iterator<Item = (&String, &ParamType)> {
+        self.params
+            .iter()
+            .filter(|(k, _)| !self.args.contains_key(k.as_str()))
     }
 
     pub fn set_arg(&mut self, name: &str, value: serde_json::Value) {
@@ -211,7 +215,7 @@ impl Invocation {
             .map(|(k, v)| (k, v.into()))
             .collect();
 
-        let tir = self.prototype.tir.clone();
+        let tir = self.tir.clone();
 
         Ok(crate::trp::ResolveParams { tir, args })
     }
@@ -237,7 +241,20 @@ mod tests {
             .with_arg("sender", json!("addr1abc"))
             .with_arg("quantity", json!(100_000_000));
 
-        dbg!(&invoke.params().unwrap());
+        let all_params: HashSet<_> = invoke.params().keys().collect();
+
+        assert_eq!(all_params.len(), 5);
+        assert!(all_params.contains(&"sender".to_string()));
+        assert!(all_params.contains(&"quantity".to_string()));
+        assert!(all_params.contains(&"middleman".to_string()));
+        assert!(all_params.contains(&"receiver".to_string()));
+        assert!(all_params.contains(&"tax".to_string()));
+
+        let unspecified_params: HashSet<_> = invoke.unspecified_params().map(|(k, _)| k).collect();
+
+        assert_eq!(unspecified_params.len(), 2);
+        assert!(unspecified_params.contains(&"receiver".to_string()));
+        assert!(unspecified_params.contains(&"middleman".to_string()));
 
         let tx = invoke.into_resolve_request().unwrap();
 
