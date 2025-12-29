@@ -8,15 +8,21 @@ use crate::core::TirEnvelope;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TiiFile {
     pub tii: TiiInfo,
+
     pub protocol: Protocol,
-    #[serde(skip_serializing_if = "Option::is_none")]
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<Schema>,
-    #[serde(default)]
+
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub parties: HashMap<String, Party>,
+
     pub transactions: HashMap<String, Transaction>,
-    #[serde(skip_serializing_if = "HashMap::is_empty")]
+
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub profiles: HashMap<String, Profile>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub components: Option<Components>,
 }
 
@@ -29,9 +35,12 @@ pub struct TiiInfo {
 /// Protocol metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Protocol {
-    pub scope: String,
     pub name: String,
     pub version: String,
+
+    #[serde(default)]
+    pub scope: String,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
@@ -39,14 +48,16 @@ pub struct Protocol {
 /// Transaction definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transaction {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
     pub tir: TirEnvelope,
     pub params: Schema,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Party {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
 
@@ -55,8 +66,11 @@ pub struct Party {
 pub struct Profile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub environment: serde_json::Value,
+
     #[serde(default)]
+    pub environment: serde_json::Value,
+
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub parties: HashMap<String, String>,
 }
 
