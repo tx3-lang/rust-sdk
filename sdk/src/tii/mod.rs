@@ -37,8 +37,10 @@ fn params_from_schema(schema: Schema) -> Result<ParamMap, Error> {
 
     let as_object = schema.into_object();
 
-    for (key, value) in as_object.object.unwrap().properties {
-        params.insert(key, ParamType::from_json_schema(value)?);
+    if let Some(obj_validation) = as_object.object {
+        for (key, value) in obj_validation.properties {
+            params.insert(key, ParamType::from_json_schema(value)?);
+        }
     }
 
     Ok(params)

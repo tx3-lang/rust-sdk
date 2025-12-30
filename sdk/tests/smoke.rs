@@ -22,6 +22,10 @@ fn test_tii_files() {
             .map_err(|e| eprintln!("Error reading file {}: {}", path.display(), e))
             .unwrap();
 
-        let _ = Protocol::from_string(tii).unwrap();
+        let protocol = Protocol::from_string(tii).unwrap();
+
+        for tx in protocol.txs().keys() {
+            let _ = protocol.invoke(tx, None).unwrap();
+        }
     }
 }
