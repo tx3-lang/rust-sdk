@@ -4,11 +4,18 @@ use serde::{Deserialize, Serialize};
 use crate::core::{ArgMap, BytesEnvelope, TirEnvelope};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum WitnessInput {
+    Object(SubmitWitness),
+    Hex(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubmitParams {
     #[serde(rename = "tx")]
     pub tx: BytesEnvelope,
     #[serde(rename = "witnesses")]
-    pub witnesses: Vec<SubmitWitness>,
+    pub witnesses: Vec<WitnessInput>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
