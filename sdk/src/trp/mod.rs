@@ -24,8 +24,10 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub use crate::trp::spec::{
-    InputNotResolvedDiagnostic, MissingTxArgDiagnostic, ResolveParams, SubmitParams,
-    SubmitResponse, SubmitWitness, TxEnvelope, TxScriptFailureDiagnostic, UnsupportedTirDiagnostic,
+    ChainPoint, CheckStatusResponse, DumpLogsResponse, InflightTx, InputNotResolvedDiagnostic,
+    MissingTxArgDiagnostic, PeekInflightResponse, PeekPendingResponse, PendingTx, ResolveParams,
+    SubmitParams, SubmitResponse, TxEnvelope, TxLog, TxScriptFailureDiagnostic, TxStage, TxStatus,
+    TxStatusMap, TxWitness, UnsupportedTirDiagnostic, WitnessType,
 };
 
 mod spec;
@@ -63,11 +65,11 @@ pub enum Error {
     #[error("node can't resolve txs while running at era {era}")]
     UnsupportedEra { era: String },
 
-    #[error("missing argument `{key}` of type {ty}", key = .0.key, ty = .0.ty)]
+    #[error("missing argument `{key}` of type {ty}", key = .0.key, ty = .0.arg_type)]
     MissingTxArg(MissingTxArgDiagnostic),
 
     #[error("input `{name}` not resolved", name = .0.name)]
-    InputNotResolved(InputNotResolvedDiagnostic),
+    InputNotResolved(Box<InputNotResolvedDiagnostic>),
 
     #[error("tx script returned failure")]
     TxScriptFailure(TxScriptFailureDiagnostic),
@@ -103,7 +105,7 @@ impl From<JsonRpcError> for Error {
                 Err(e) => e,
             },
             -32002 => match expect_json_rpc_error_data(error) {
-                Ok(data) => Error::InputNotResolved(data),
+                Ok(data) => Error::InputNotResolved(Box::new(data)),
                 Err(e) => e,
             },
             -32003 => match expect_json_rpc_error_data(error) {
@@ -237,6 +239,84 @@ impl Client {
         let params = serde_json::to_value(request).unwrap();
 
         let response = self.call("trp.submit", params).await?;
+
+        let out = serde_json::from_value(response)
+            .map_err(|e| Error::DeserializationError(e.to_string()))?;
+
+        Ok(out)
+    }
+
+    pub async fn check_status(&self, hashes: Vec<String>) -> Result<CheckStatusResponse, Error> {
+        let params = serde_json::json!({ "hashes": hashes });
+
+        let response = self.call("trp.checkStatus", params).await?;
+
+        let out = serde_json::from_value(response)
+            .map_err(|e| Error::DeserializationError(e.to_string()))?;
+
+        Ok(out)
+    }
+
+    pub async fn dump_logs(
+        &self,
+        cursor: Option<u64>,
+        limit: Option<u64>,
+        include_payload: Option<bool>,
+    ) -> Result<DumpLogsResponse, Error> {
+        let mut params = serde_json::Map::new();
+        if let Some(cursor) = cursor {
+            params.insert("cursor".to_string(), serde_json::json!(cursor));
+        }
+        if let Some(limit) = limit {
+            params.insert("limit".to_string(), serde_json::json!(limit));
+        }
+        if let Some(include_payload) = include_payload {
+            params.insert("includePayload".to_string(), serde_json::json!(include_payload));
+        }
+
+        let response = self.call("trp.dumpLogs", serde_json::Value::Object(params)).await?;
+
+        let out = serde_json::from_value(response)
+            .map_err(|e| Error::DeserializationError(e.to_string()))?;
+
+        Ok(out)
+    }
+
+    pub async fn peek_pending(
+        &self,
+        limit: Option<u64>,
+        include_payload: Option<bool>,
+    ) -> Result<PeekPendingResponse, Error> {
+        let mut params = serde_json::Map::new();
+        if let Some(limit) = limit {
+            params.insert("limit".to_string(), serde_json::json!(limit));
+        }
+        if let Some(include_payload) = include_payload {
+            params.insert("includePayload".to_string(), serde_json::json!(include_payload));
+        }
+
+        let response = self.call("trp.peekPending", serde_json::Value::Object(params)).await?;
+
+        let out = serde_json::from_value(response)
+            .map_err(|e| Error::DeserializationError(e.to_string()))?;
+
+        Ok(out)
+    }
+
+    pub async fn peek_inflight(
+        &self,
+        limit: Option<u64>,
+        include_payload: Option<bool>,
+    ) -> Result<PeekInflightResponse, Error> {
+        let mut params = serde_json::Map::new();
+        if let Some(limit) = limit {
+            params.insert("limit".to_string(), serde_json::json!(limit));
+        }
+        if let Some(include_payload) = include_payload {
+            params.insert("includePayload".to_string(), serde_json::json!(include_payload));
+        }
+
+        let response = self.call("trp.peekInflight", serde_json::Value::Object(params)).await?;
 
         let out = serde_json::from_value(response)
             .map_err(|e| Error::DeserializationError(e.to_string()))?;

@@ -113,7 +113,7 @@ impl Protocol {
             }
 
             for (key, value) in profile.parties.iter() {
-                out.set_arg(&key, json!(value));
+                out.set_arg(key, json!(value));
             }
         }
 
@@ -215,16 +215,18 @@ impl Invocation {
     }
 
     pub fn into_resolve_request(self) -> Result<crate::trp::ResolveParams, Error> {
-        let args = self
-            .args
-            .clone()
-            .into_iter()
-            .map(|(k, v)| (k, v.into()))
-            .collect();
+        let args = self.args.clone().into_iter().collect();
 
         let tir = self.tir.clone();
 
-        Ok(crate::trp::ResolveParams { tir, args })
+        Ok(crate::trp::ResolveParams {
+            tir,
+            args,
+            // We're already merging env into params / args, no need to send it independently.
+            // Having both mechanism is a footgun. We should revisit either the TRP schema to
+            // remove the option or split how we send the env in the SDK.
+            env: None,
+        })
     }
 }
 
