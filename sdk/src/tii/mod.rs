@@ -113,7 +113,7 @@ impl Protocol {
             }
 
             for (key, value) in profile.parties.iter() {
-                out.set_arg(&key, json!(value));
+                out.set_arg(key, json!(value));
             }
         }
 
@@ -215,12 +215,7 @@ impl Invocation {
     }
 
     pub fn into_resolve_request(self) -> Result<crate::trp::ResolveParams, Error> {
-        let args = self
-            .args
-            .clone()
-            .into_iter()
-            .map(|(k, v)| (k, v.into()))
-            .collect();
+        let args = self.args.clone().into_iter().collect();
 
         let tir = self.tir.clone();
 

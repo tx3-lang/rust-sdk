@@ -69,7 +69,7 @@ pub enum Error {
     MissingTxArg(MissingTxArgDiagnostic),
 
     #[error("input `{name}` not resolved", name = .0.name)]
-    InputNotResolved(InputNotResolvedDiagnostic),
+    InputNotResolved(Box<InputNotResolvedDiagnostic>),
 
     #[error("tx script returned failure")]
     TxScriptFailure(TxScriptFailureDiagnostic),
@@ -105,7 +105,7 @@ impl From<JsonRpcError> for Error {
                 Err(e) => e,
             },
             -32002 => match expect_json_rpc_error_data(error) {
-                Ok(data) => Error::InputNotResolved(data),
+                Ok(data) => Error::InputNotResolved(Box::new(data)),
                 Err(e) => e,
             },
             -32003 => match expect_json_rpc_error_data(error) {
