@@ -224,7 +224,14 @@ impl Invocation {
 
         let tir = self.tir.clone();
 
-        Ok(crate::trp::ResolveParams { tir, args })
+        Ok(crate::trp::ResolveParams {
+            tir,
+            args,
+            // We're already merging env into params / args, no need to send it independently.
+            // Having both mechanism is a footgun. We should revisit either the TRP schema to
+            // remove the option or split how we send the env in the SDK.
+            env: None,
+        })
     }
 }
 
