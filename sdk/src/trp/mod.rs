@@ -1,20 +1,41 @@
 //! Transaction Resolve Protocol (TRP) Client
 //!
-//! This SDK provides tools for interacting with TX3 services.
-//! Currently includes support for the Transaction Resolve Protocol (TRP).
+//! This module provides a client for interacting with the Transaction Resolve Protocol (TRP),
+//! a JSON-RPC based protocol for resolving, submitting, and tracking UTxO transactions.
+//!
+//! ## Key Features
+//!
+//! - **Transaction Resolution**: Convert TX3 transaction templates into concrete UTxO transactions
+//! - **Transaction Submission**: Submit signed transactions to the network
+//! - **Status Monitoring**: Track transaction lifecycle from pending to finalization
+//! - **Queue Inspection**: Peek at pending and in-flight transactions
+//! - **Log Access**: Query historical transaction logs
 //!
 //! ## Usage Example
 //!
-//! ```
-//! use tx3_sdk::trp::{Client, ClientOptions};
+//! ```ignore
+//! use tx3_sdk::trp::{Client, ClientOptions, ResolveParams, SubmitParams};
+//! use tx3_sdk::core::TirEnvelope;
 //!
 //! // Create TRP client
 //! let client = Client::new(ClientOptions {
 //!     endpoint: "https://trp.example.com".to_string(),
 //!     headers: None,
 //! });
-//! ```
 //!
+//! // Resolve a transaction
+//! let params = ResolveParams {
+//!     tir: TirEnvelope { /* ... */ },
+//!     args: serde_json::Map::new(),
+//!     env: None,
+//! };
+//!
+//! let tx_envelope = client.resolve(params).await?;
+//! println!("Resolved transaction hash: {}", tx_envelope.hash);
+//!
+//! // Check status
+//! let status = client.check_status(vec![tx_envelope.hash]).await?;
+//! ```
 
 use reqwest::header;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -32,45 +53,73 @@ pub use crate::trp::spec::{
 
 mod spec;
 
-// Custom error type for TRP operations
+/// Error type for TRP client operations.
+///
+/// This enum represents all possible errors that can occur when interacting
+/// with the TRP protocol, including network errors, HTTP errors, deserialization
+/// errors, and specific TRP protocol errors.
 #[derive(Debug, Error)]
 pub enum Error {
+    /// Network error from the underlying HTTP client.
     #[error("network error: {0}")]
     NetworkError(#[from] reqwest::Error),
 
+    /// HTTP error with status code and message.
     #[error("HTTP error {0}: {1}")]
     HttpError(u16, String),
 
+    /// Failed to deserialize the response from the server.
     #[error("Failed to deserialize response: {0}")]
     DeserializationError(String),
 
+    /// Generic JSON-RPC error with code, message, and optional data.
     #[error("({0}) {1}")]
     GenericRpcError(i32, String, Option<Value>),
 
+    /// Unknown error with a message.
     #[error("Unknown error: {0}")]
     UnknownError(String),
 
+    /// The TIR version provided is not supported by the server.
+    ///
+    /// Contains the expected and provided version information.
     #[error("TIR version {provided} is not supported, expected {expected}", provided = .0.provided, expected = .0.expected)]
     UnsupportedTir(UnsupportedTirDiagnostic),
 
+    /// The TIR envelope format is invalid.
     #[error("invalid TIR envelope")]
     InvalidTirEnvelope,
 
+    /// Failed to decode the intermediate representation bytes.
     #[error("failed to decode IR bytes")]
     InvalidTirBytes,
 
+    /// Only transactions from the Conway era are supported.
     #[error("only txs from Conway era are supported")]
     UnsupportedTxEra,
 
+    /// The node cannot resolve transactions while running at the specified era.
     #[error("node can't resolve txs while running at era {era}")]
-    UnsupportedEra { era: String },
+    UnsupportedEra { 
+        /// The era that doesn't support transaction resolution.
+        era: String 
+    },
 
+    /// A required transaction argument is missing.
+    ///
+    /// Contains the name and expected type of the missing argument.
     #[error("missing argument `{key}` of type {ty}", key = .0.key, ty = .0.arg_type)]
     MissingTxArg(MissingTxArgDiagnostic),
 
+    /// An input could not be resolved during transaction construction.
+    ///
+    /// Contains diagnostic information about the failed query.
     #[error("input `{name}` not resolved", name = .0.name)]
     InputNotResolved(Box<InputNotResolvedDiagnostic>),
 
+    /// The transaction script execution failed.
+    ///
+    /// Contains log output from the failed script.
     #[error("tx script returned failure")]
     TxScriptFailure(TxScriptFailureDiagnostic),
 }
@@ -117,17 +166,49 @@ impl From<JsonRpcError> for Error {
     }
 }
 
+/// Configuration options for the TRP client.
+///
+/// This structure holds the configuration needed to create a TRP client,
+/// including the endpoint URL and optional custom headers.
+///
+/// # Example
+///
+/// ```ignore
+/// use tx3_sdk::trp::ClientOptions;
+/// use std::collections::HashMap;
+///
+/// let mut headers = HashMap::new();
+/// headers.insert("Authorization".to_string(), "Bearer token123".to_string());
+///
+/// let options = ClientOptions {
+///     endpoint: "https://trp.example.com".to_string(),
+///     headers: Some(headers),
+/// };
+/// ```
 #[derive(Debug, Clone)]
 pub struct ClientOptions {
+    /// The TRP server endpoint URL.
     pub endpoint: String,
+    
+    /// Optional custom HTTP headers to include in requests.
     pub headers: Option<HashMap<String, String>>,
 }
 
+/// JSON-RPC request structure.
+///
+/// Internal structure used to serialize JSON-RPC requests to the TRP server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcRequest {
+    /// JSON-RPC version (always "2.0").
     pub jsonrpc: String,
+    
+    /// The method name to call.
     pub method: String,
+    
+    /// The method parameters.
     pub params: serde_json::Value,
+    
+    /// Request ID (UUID).
     pub id: String,
 }
 
@@ -144,7 +225,28 @@ struct JsonRpcError {
     data: Option<Value>,
 }
 
-/// Client for the Transaction Resolve Protocol (TRP)
+/// Client for the Transaction Resolve Protocol (TRP).
+///
+/// This client provides methods for interacting with a TRP server to resolve
+/// transaction templates, submit signed transactions, and monitor transaction
+/// status.
+///
+/// The client is cloneable and can be reused across multiple requests.
+///
+/// # Example
+///
+/// ```ignore
+/// use tx3_sdk::trp::{Client, ClientOptions};
+///
+/// let client = Client::new(ClientOptions {
+///     endpoint: "https://trp.example.com".to_string(),
+///     headers: None,
+/// });
+///
+/// // Use the client for multiple operations
+/// let tx = client.resolve(params).await?;
+/// let status = client.check_status(vec![tx.hash]).await?;
+/// ```
 #[derive(Clone)]
 pub struct Client {
     options: ClientOptions,
@@ -152,6 +254,22 @@ pub struct Client {
 }
 
 impl Client {
+    /// Creates a new TRP client with the given options.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Configuration options including endpoint URL and optional headers
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tx3_sdk::trp::{Client, ClientOptions};
+    ///
+    /// let client = Client::new(ClientOptions {
+    ///     endpoint: "https://trp.example.com".to_string(),
+    ///     headers: None,
+    /// });
+    /// ```
     pub fn new(options: ClientOptions) -> Self {
         Self {
             options,
@@ -159,6 +277,19 @@ impl Client {
         }
     }
 
+    /// Makes a raw JSON-RPC call to the TRP server.
+    ///
+    /// This is a low-level method for making JSON-RPC calls. Generally, you should
+    /// use the higher-level methods like `resolve`, `submit`, etc.
+    ///
+    /// # Arguments
+    ///
+    /// * `method` - The JSON-RPC method name
+    /// * `params` - The method parameters as a JSON value
+    ///
+    /// # Returns
+    ///
+    /// Returns the result as a JSON value on success, or an error on failure.
     pub async fn call(
         &self,
         method: &str,
@@ -223,6 +354,45 @@ impl Client {
             .ok_or_else(|| Error::UnknownError("No result in response".to_string()))
     }
 
+    /// Resolves a transaction template into a concrete transaction.
+    ///
+    /// This method takes a Transaction Intermediate Representation (TIR) envelope
+    /// and arguments, and resolves it into a concrete UTxO transaction ready
+    /// for signing.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - The resolve parameters including TIR and arguments
+    ///
+    /// # Returns
+    ///
+    /// Returns a `TxEnvelope` containing the resolved transaction hash and CBOR bytes.
+    ///
+    /// # Errors
+    ///
+    /// Can return various errors including:
+    /// - `Error::UnsupportedTir` if the TIR version is not supported
+    /// - `Error::MissingTxArg` if required arguments are missing
+    /// - `Error::InputNotResolved` if an input cannot be found
+    /// - `Error::TxScriptFailure` if script execution fails
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tx3_sdk::trp::{Client, ResolveParams};
+    /// use tx3_sdk::core::TirEnvelope;
+    ///
+    /// let client = Client::new(/* ... */);
+    ///
+    /// let params = ResolveParams {
+    ///     tir: TirEnvelope { /* ... */ },
+    ///     args: serde_json::Map::new(),
+    ///     env: None,
+    /// };
+    ///
+    /// let tx = client.resolve(params).await?;
+    /// println!("Resolved hash: {}", tx.hash);
+    /// ```
     pub async fn resolve(&self, request: ResolveParams) -> Result<TxEnvelope, Error> {
         let params = serde_json::to_value(request).unwrap();
 
@@ -235,6 +405,35 @@ impl Client {
         Ok(out)
     }
 
+    /// Submits a signed transaction to the network.
+    ///
+    /// This method submits a signed transaction with its witnesses to the
+    /// blockchain network via the TRP server.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - The submit parameters including transaction bytes and witnesses
+    ///
+    /// # Returns
+    ///
+    /// Returns a `SubmitResponse` containing the submitted transaction hash.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tx3_sdk::trp::{Client, SubmitParams, TxWitness, WitnessType};
+    /// use tx3_sdk::core::BytesEnvelope;
+    ///
+    /// let client = Client::new(/* ... */);
+    ///
+    /// let params = SubmitParams {
+    ///     tx: BytesEnvelope { /* signed tx */ },
+    ///     witnesses: vec![TxWitness { /* ... */ }],
+    /// };
+    ///
+    /// let response = client.submit(params).await?;
+    /// println!("Submitted: {}", response.hash);
+    /// ```
     pub async fn submit(&self, request: SubmitParams) -> Result<SubmitResponse, Error> {
         let params = serde_json::to_value(request).unwrap();
 
@@ -246,6 +445,34 @@ impl Client {
         Ok(out)
     }
 
+    /// Checks the status of one or more transactions.
+    ///
+    /// This method queries the TRP server for the current status of the
+    /// specified transactions.
+    ///
+    /// # Arguments
+    ///
+    /// * `hashes` - Vector of transaction hashes to check
+    ///
+    /// # Returns
+    ///
+    /// Returns a `CheckStatusResponse` containing a map of transaction hashes
+    /// to their current status.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tx3_sdk::trp::Client;
+    ///
+    /// let client = Client::new(/* ... */);
+    ///
+    /// let hashes = vec!["abc123...".to_string()];
+    /// let status = client.check_status(hashes).await?;
+    ///
+    /// for (hash, tx_status) in status.statuses {
+    ///     println!("{}: {:?}", hash, tx_status.stage);
+    /// }
+    /// ```
     pub async fn check_status(&self, hashes: Vec<String>) -> Result<CheckStatusResponse, Error> {
         let params = serde_json::json!({ "hashes": hashes });
 
@@ -257,6 +484,41 @@ impl Client {
         Ok(out)
     }
 
+    /// Dumps transaction logs with optional pagination.
+    ///
+    /// This method retrieves a paginated list of transaction log entries,
+    /// useful for monitoring and auditing transaction history.
+    ///
+    /// # Arguments
+    ///
+    /// * `cursor` - Optional pagination cursor for fetching specific pages
+    /// * `limit` - Optional limit on the number of entries to return
+    /// * `include_payload` - Whether to include transaction payloads in the response
+    ///
+    /// # Returns
+    ///
+    /// Returns a `DumpLogsResponse` containing log entries and an optional
+    /// next cursor for pagination.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tx3_sdk::trp::Client;
+    ///
+    /// let client = Client::new(/* ... */);
+    ///
+    /// // Get first page with 100 entries
+    /// let logs = client.dump_logs(None, Some(100), Some(false)).await?;
+    ///
+    /// for entry in logs.entries {
+    ///     println!("{}: {:?}", entry.hash, entry.stage);
+    /// }
+    ///
+    /// // Get next page if available
+    /// if let Some(next) = logs.next_cursor {
+    ///     let more_logs = client.dump_logs(Some(next), Some(100), Some(false)).await?;
+    /// }
+    /// ```
     pub async fn dump_logs(
         &self,
         cursor: Option<u64>,
@@ -282,6 +544,34 @@ impl Client {
         Ok(out)
     }
 
+    /// Peeks at pending transactions in the mempool.
+    ///
+    /// This method retrieves pending transactions that are waiting to be
+    /// included in a block, useful for monitoring mempool state.
+    ///
+    /// # Arguments
+    ///
+    /// * `limit` - Optional limit on the number of pending transactions to return
+    /// * `include_payload` - Whether to include transaction payloads in the response
+    ///
+    /// # Returns
+    ///
+    /// Returns a `PeekPendingResponse` containing pending transactions.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tx3_sdk::trp::Client;
+    ///
+    /// let client = Client::new(/* ... */);
+    ///
+    /// let pending = client.peek_pending(Some(50), Some(false)).await?;
+    ///
+    /// println!("Found {} pending transactions", pending.entries.len());
+    /// if pending.has_more {
+    ///     println!("More transactions available");
+    /// }
+    /// ```
     pub async fn peek_pending(
         &self,
         limit: Option<u64>,
@@ -303,6 +593,34 @@ impl Client {
         Ok(out)
     }
 
+    /// Peeks at in-flight transactions being tracked by the server.
+    ///
+    /// This method retrieves transactions that have been submitted and are
+    /// being tracked through their lifecycle stages.
+    ///
+    /// # Arguments
+    ///
+    /// * `limit` - Optional limit on the number of in-flight transactions to return
+    /// * `include_payload` - Whether to include transaction payloads in the response
+    ///
+    /// # Returns
+    ///
+    /// Returns a `PeekInflightResponse` containing in-flight transactions.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use tx3_sdk::trp::Client;
+    ///
+    /// let client = Client::new(/* ... */);
+    ///
+    /// let inflight = client.peek_inflight(Some(50), Some(false)).await?;
+    ///
+    /// for tx in inflight.entries {
+    ///     println!("{}: {:?} ({} confirmations)", 
+    ///         tx.hash, tx.stage, tx.confirmations);
+    /// }
+    /// ```
     pub async fn peek_inflight(
         &self,
         limit: Option<u64>,
