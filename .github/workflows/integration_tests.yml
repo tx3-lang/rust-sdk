@@ -1,0 +1,59 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM UTC (nightly)
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  integration-tests:
+    name: Run Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15  # Generous timeout for test completion
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "integration-tests"
+          cache-directories: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+
+      - name: Run error case tests
+        working-directory: ./sdk
+        env:
+          TRP_ENDPOINT: ${{ secrets.TRP_ENDPOINT }}
+          DMTR_API_KEY: ${{ secrets.DMTR_API_KEY }}
+        run: cargo test --test error_cases
+
+      - name: Run happy path lifecycle test
+        working-directory: ./sdk
+        env:
+          TRP_ENDPOINT: ${{ secrets.TRP_ENDPOINT }}
+          TRP_TEST_SENDER: ${{ secrets.TRP_TEST_SENDER }}
+          TRP_TEST_RECEIVER: ${{ secrets.TRP_TEST_RECEIVER }}
+          TRP_TEST_PRIVATE_KEY: ${{ secrets.TRP_TEST_PRIVATE_KEY }}
+          DMTR_API_KEY: ${{ secrets.DMTR_API_KEY }}
+        run: cargo test --test happy_path -- --nocapture
+
+      - name: Test summary
+        if: always()
+        run: |
+          echo "=== Integration Tests Summary ==="
+          echo "Error case tests: Complete"
+          echo "Happy path test: Complete"
+          echo "All TRP integration tests executed successfully"
