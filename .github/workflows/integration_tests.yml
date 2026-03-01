@@ -44,9 +44,8 @@ jobs:
         working-directory: ./sdk
         env:
           TRP_ENDPOINT: ${{ secrets.TRP_ENDPOINT }}
-          TRP_TEST_SENDER: ${{ secrets.TRP_TEST_SENDER }}
-          TRP_TEST_RECEIVER: ${{ secrets.TRP_TEST_RECEIVER }}
-          TRP_TEST_PRIVATE_KEY: ${{ secrets.TRP_TEST_PRIVATE_KEY }}
+          TRP_TEST_PARTY: ${{ secrets.TRP_TEST_PARTY }}
+          TRP_TEST_MNEMONIC: ${{ secrets.TRP_TEST_MNEMONIC }}
           DMTR_API_KEY: ${{ secrets.DMTR_API_KEY }}
         run: cargo test --test happy_path -- --nocapture
 

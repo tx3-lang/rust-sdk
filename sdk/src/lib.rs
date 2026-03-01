@@ -85,11 +85,65 @@
 //! let status = client.check_status(vec![submit_response.hash]).await?;
 //! ```
 //!
+//! ### Full Lifecycle (Facade)
+//!
+//! ```ignore
+//! use serde_json::json;
+//! use tx3_sdk::{Party, PollConfig, Tx3Client};
+//! use tx3_sdk::CardanoSigner;
+//!
+//! # async fn demo(protocol: tx3_sdk::tii::Protocol, trp: tx3_sdk::trp::Client) -> Result<(), tx3_sdk::Error> {
+//! let signer = CardanoSigner::from_hex("your_private_key_in_hex", "addr1...")?;
+//! let tx3 = Tx3Client::new(protocol, trp)
+//!     .with_profile("preprod")
+//!     .with_party("sender", Party::signer("addr1...", signer))
+//!     .with_party("receiver", Party::address("addr1..."));
+//!
+//! let status = tx3
+//!     .tx("transfer")
+//!     .arg("quantity", 10_000_000)
+//!     .resolve()
+//!     .await?
+//!     .sign()?
+//!     .submit()
+//!     .await?
+//!     .wait_for_confirmed(PollConfig::default())
+//!     .await?;
+//!
+//! println!("Confirmed at stage: {:?}", status.stage);
+//! # Ok(())
+//! # }
+//!
+//! // Inspect witness payloads (what gets sent in submit)
+//! # async fn inspect(protocol: tx3_sdk::tii::Protocol, trp: tx3_sdk::trp::Client) -> Result<(), tx3_sdk::Error> {
+//! let tx3 = Tx3Client::new(protocol, trp)
+//!     .with_profile("preprod")
+//!     .with_party("sender", Party::signer("addr1...", CardanoSigner::from_hex("key", "addr1...")?));
+//! let signed = tx3
+//!     .tx("transfer")
+//!     .arg("quantity", 10_000_000)
+//!     .resolve()
+//!     .await?
+//!     .sign()?;
+//! for info in signed.witnesses() {
+//!     println!("party={} address={} key={} sig={} hash={}",
+//!         info.party,
+//!         info.address,
+//!         info.key.content,
+//!         info.signature.content,
+//!         info.signed_hash,
+//!     );
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
 //! ## Module Overview
 //!
 //! - [`core`]: Core types and data structures used across the SDK
 //! - [`tii`]: Transaction Invocation Interface for loading and interacting with TX3 protocols
 //! - [`trp`]: Transaction Resolve Protocol client for submitting and tracking transactions
+//! - [`facade`]: Ergonomic lifecycle facade for TX3 transactions
 //!
 //! ## Links
 //!
@@ -100,3 +154,10 @@
 pub mod core;
 pub mod tii;
 pub mod trp;
+pub mod facade;
+
+pub use facade::{
+    Error, Party, PollConfig, ResolvedTx, SignedTx, Signer, SubmittedTx, Tx3Client, TxBuilder,
+    WitnessInfo,
+};
+pub use facade::signer::{CardanoSigner, Ed25519Signer};
