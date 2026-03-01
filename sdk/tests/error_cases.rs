@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 use std::env;
-use tx3_sdk::core::{TirEnvelope, TirEncoding};
+use tx3_sdk::core::{TirEncoding, TirEnvelope};
 use tx3_sdk::trp::{Client, ClientOptions, ResolveParams};
 
 /// Gets the TRP endpoint from environment variable.
@@ -45,7 +45,11 @@ fn create_trp_client() -> Option<Client> {
 
         Client::new(ClientOptions {
             endpoint,
-            headers: if headers.is_empty() { None } else { Some(headers) },
+            headers: if headers.is_empty() {
+                None
+            } else {
+                Some(headers)
+            },
         })
     })
 }

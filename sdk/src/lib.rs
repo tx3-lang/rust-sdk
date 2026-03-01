@@ -48,12 +48,12 @@
 //! - [TX3 Documentation](https://docs.txpipe.io/tx3)
 
 pub mod core;
+pub mod facade;
 pub mod tii;
 pub mod trp;
-pub mod facade;
 
+pub use facade::signer::{CardanoSigner, Ed25519Signer};
 pub use facade::{
     Error, Party, PollConfig, ResolvedTx, SignedTx, Signer, SubmittedTx, Tx3Client, TxBuilder,
     WitnessInfo,
 };
-pub use facade::signer::{CardanoSigner, Ed25519Signer};

@@ -720,7 +720,7 @@ pub mod signer {
 
         root.derive(DerivationScheme::V2, 1852 | HARDENED)
             .derive(DerivationScheme::V2, 1815 | HARDENED)
-            .derive(DerivationScheme::V2, 0 | HARDENED)
+            .derive(DerivationScheme::V2, HARDENED)
             .derive(DerivationScheme::V2, 0)
             .derive(DerivationScheme::V2, 0)
     }
