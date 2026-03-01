@@ -66,7 +66,7 @@ fn create_trp_client() -> Option<Client> {
 
     // Add TRP API key header if available
     if let Some(api_key) = get_trp_api_key() {
-        headers.insert("trp-api-key".to_string(), api_key);
+        headers.insert("dmtr-api-key".to_string(), api_key);
     }
 
     Some(Client::new(ClientOptions {
