@@ -108,11 +108,11 @@ async fn test_trp_happy_path_lifecycle() {
 
     let protocol = load_transfer_protocol();
     let signer =
-        CardanoSigner::from_mnemonic(&mnemonic, &party).expect("Invalid mnemonic or address");
+        CardanoSigner::from_mnemonic(&party, &mnemonic).expect("Invalid mnemonic or address");
 
     let tx3 = Tx3Client::new(protocol, trp.clone())
         .with_profile("preprod")
-        .with_party("sender", Party::signer(&party, signer))
+        .with_party("sender", Party::signer(signer))
         .with_party("middleman", Party::address(&party))
         .with_party("receiver", Party::address(&party));
 

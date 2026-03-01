@@ -62,6 +62,8 @@ pub enum Error {
 }
 
 /// Configuration for check-status polling.
+///
+/// Used by `wait_for_confirmed` and `wait_for_finalized`.
 #[derive(Debug, Clone)]
 pub struct PollConfig {
     /// Number of attempts before timing out.
@@ -80,7 +82,12 @@ impl Default for PollConfig {
 }
 
 /// A signer capable of producing TRP witnesses.
+///
+/// Signers are address-aware and must return the address they correspond to.
 pub trait Signer: Send + Sync {
+    /// Returns the address associated with this signer.
+    fn address(&self) -> &str;
+
     /// Signs a transaction hash given as hex-encoded bytes.
     fn sign(&self, tx_hash: &str) -> Result<TxWitness, Box<dyn std::error::Error + Send + Sync>>;
 }
@@ -105,10 +112,22 @@ impl Party {
         Party::Address(address.into())
     }
 
-    /// Creates a signer party from an address and signer.
-    pub fn signer(address: impl Into<String>, signer: impl Signer + 'static) -> Self {
+    /// Creates a signer party from a signer.
+    ///
+    /// The party address is taken from the signer itself.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use tx3_sdk::{CardanoSigner, Party};
+    ///
+    /// let signer = CardanoSigner::from_hex("addr_test1...", "deadbeef...")?;
+    /// let party = Party::signer(signer);
+    /// # Ok::<(), tx3_sdk::Error>(())
+    /// ```
+    pub fn signer(signer: impl Signer + 'static) -> Self {
         Party::Signer {
-            address: address.into(),
+            address: signer.address().to_string(),
             signer: Arc::new(signer),
         }
     }
@@ -153,6 +172,8 @@ impl Tx3Client {
     }
 
     /// Sets the profile for all invocations created by this client.
+    ///
+    /// This profile is applied to every invocation created by the client.
     pub fn with_profile(mut self, profile: impl Into<String>) -> Self {
         self.profile = Some(profile.into());
         self
@@ -474,30 +495,55 @@ pub mod signer {
     }
 
     /// Built-in ed25519 signer using a 32-byte private key.
+    ///
+    /// The address is required at construction and returned via `Signer::address`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use tx3_sdk::Ed25519Signer;
+    ///
+    /// let signer = Ed25519Signer::from_hex("addr_test1...", "deadbeef...")?;
+    /// # Ok::<(), tx3_sdk::Error>(())
+    /// ```
     #[derive(Debug, Clone)]
     pub struct Ed25519Signer {
+        address: String,
         private_key: [u8; 32],
     }
 
     impl Ed25519Signer {
-        /// Creates a signer from a raw 32-byte private key.
-        pub fn new(private_key: [u8; 32]) -> Self {
-            Self { private_key }
+        /// Creates a signer from a raw 32-byte private key and address.
+        pub fn new(address: impl Into<String>, private_key: [u8; 32]) -> Self {
+            Self {
+                address: address.into(),
+                private_key,
+            }
         }
 
         /// Creates a signer from a BIP39 mnemonic phrase.
-        pub fn from_mnemonic(phrase: &str) -> Result<Self, SignerError> {
+        ///
+        /// The address is required and stored on the signer.
+        pub fn from_mnemonic(
+            address: impl Into<String>,
+            phrase: &str,
+        ) -> Result<Self, SignerError> {
             let mnemonic = bip39::Mnemonic::parse(phrase).map_err(SignerError::InvalidMnemonic)?;
             let seed = mnemonic.to_seed("");
 
             let mut key_array = [0u8; 32];
             key_array.copy_from_slice(&seed[0..32]);
 
-            Ok(Self::new(key_array))
+            Ok(Self::new(address, key_array))
         }
 
         /// Creates a signer from a hex-encoded 32-byte private key.
-        pub fn from_hex(private_key_hex: &str) -> Result<Self, SignerError> {
+        ///
+        /// The address is required and stored on the signer.
+        pub fn from_hex(
+            address: impl Into<String>,
+            private_key_hex: &str,
+        ) -> Result<Self, SignerError> {
             let key_bytes =
                 hex::decode(private_key_hex).map_err(SignerError::InvalidPrivateKeyHex)?;
 
@@ -508,13 +554,28 @@ pub mod signer {
             let mut key_array = [0u8; 32];
             key_array.copy_from_slice(&key_bytes);
 
-            Ok(Self::new(key_array))
+            Ok(Self::new(address, key_array))
         }
     }
 
     /// Cardano signer that derives witness key from address payment part.
+    ///
+    /// This signer derives keys using the Cardano path `m/1852'/1815'/0'/0/0`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use tx3_sdk::CardanoSigner;
+    ///
+    /// let signer = CardanoSigner::from_mnemonic(
+    ///     "addr_test1...",
+    ///     "word1 word2 ... word24",
+    /// )?;
+    /// # Ok::<(), tx3_sdk::Error>(())
+    /// ```
     #[derive(Debug, Clone)]
     pub struct CardanoSigner {
+        address: String,
         private_key: CardanoPrivateKey,
         payment_key_hash: Vec<u8>,
     }
@@ -550,6 +611,7 @@ pub mod signer {
             let address = address.into();
             let payment_key_hash = extract_payment_key_hash(&address)?;
             Ok(Self {
+                address,
                 private_key,
                 payment_key_hash,
             })
@@ -557,8 +619,8 @@ pub mod signer {
 
         /// Creates a Cardano signer from a hex-encoded private key and address.
         pub fn from_hex(
-            private_key_hex: &str,
             address: impl Into<String>,
+            private_key_hex: &str,
         ) -> Result<Self, SignerError> {
             let key_bytes =
                 hex::decode(private_key_hex).map_err(SignerError::InvalidPrivateKeyHex)?;
@@ -577,8 +639,8 @@ pub mod signer {
 
         /// Creates a Cardano signer from a mnemonic phrase and address.
         pub fn from_mnemonic(
-            phrase: &str,
             address: impl Into<String>,
+            phrase: &str,
         ) -> Result<Self, SignerError> {
             let root = derive_root_xprv(phrase, "")?;
             let payment = derive_cardano_payment_xprv(&root);
@@ -602,6 +664,10 @@ pub mod signer {
     }
 
     impl Signer for CardanoSigner {
+        fn address(&self) -> &str {
+            &self.address
+        }
+
         fn sign(
             &self,
             tx_hash: &str,
@@ -674,6 +740,10 @@ pub mod signer {
     }
 
     impl Signer for Ed25519Signer {
+        fn address(&self) -> &str {
+            &self.address
+        }
+
         fn sign(
             &self,
             tx_hash: &str,
