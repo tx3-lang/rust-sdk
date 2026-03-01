@@ -63,7 +63,7 @@ async fn test_trp_resolve_invalid_tir() {
 
     let invalid_params = ResolveParams {
         tir: TirEnvelope {
-            content: "invalid_cbor_data".to_string(),
+            content: "00".to_string(),
             encoding: TirEncoding::Hex,
             version: "v1beta0".to_string(),
         },
