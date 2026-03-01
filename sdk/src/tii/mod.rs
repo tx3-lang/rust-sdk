@@ -323,6 +323,15 @@ impl Protocol {
     pub fn txs(&self) -> &HashMap<String, spec::Transaction> {
         &self.spec.transactions
     }
+
+    /// Returns all parties defined in the protocol.
+    ///
+    /// # Returns
+    ///
+    /// Returns a reference to the map of party names to their definitions.
+    pub fn parties(&self) -> &HashMap<String, spec::Party> {
+        &self.spec.parties
+    }
 }
 
 /// Type of a transaction parameter.

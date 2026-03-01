@@ -13,9 +13,9 @@ tx transfer(
 ) {
     input source {
         from: Sender,
-        min_amount: Ada(quantity) + tax,
+        min_amount: Ada(quantity + tax),
     }
-    
+
     output {
         to: Receiver,
         amount: Ada(quantity),
@@ -28,6 +28,6 @@ tx transfer(
 
     output {
         to: Sender,
-        amount: source - Ada(quantity) - fees,
+        amount: source - Ada(quantity + tax) - fees,
     }
 }

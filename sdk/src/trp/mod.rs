@@ -100,9 +100,9 @@ pub enum Error {
 
     /// The node cannot resolve transactions while running at the specified era.
     #[error("node can't resolve txs while running at era {era}")]
-    UnsupportedEra { 
+    UnsupportedEra {
         /// The era that doesn't support transaction resolution.
-        era: String 
+        era: String,
     },
 
     /// A required transaction argument is missing.
@@ -189,7 +189,7 @@ impl From<JsonRpcError> for Error {
 pub struct ClientOptions {
     /// The TRP server endpoint URL.
     pub endpoint: String,
-    
+
     /// Optional custom HTTP headers to include in requests.
     pub headers: Option<HashMap<String, String>>,
 }
@@ -201,13 +201,13 @@ pub struct ClientOptions {
 pub struct JsonRpcRequest {
     /// JSON-RPC version (always "2.0").
     pub jsonrpc: String,
-    
+
     /// The method name to call.
     pub method: String,
-    
+
     /// The method parameters.
     pub params: serde_json::Value,
-    
+
     /// Request ID (UUID).
     pub id: String,
 }
@@ -533,10 +533,15 @@ impl Client {
             params.insert("limit".to_string(), serde_json::json!(limit));
         }
         if let Some(include_payload) = include_payload {
-            params.insert("includePayload".to_string(), serde_json::json!(include_payload));
+            params.insert(
+                "includePayload".to_string(),
+                serde_json::json!(include_payload),
+            );
         }
 
-        let response = self.call("trp.dumpLogs", serde_json::Value::Object(params)).await?;
+        let response = self
+            .call("trp.dumpLogs", serde_json::Value::Object(params))
+            .await?;
 
         let out = serde_json::from_value(response)
             .map_err(|e| Error::DeserializationError(e.to_string()))?;
@@ -582,10 +587,15 @@ impl Client {
             params.insert("limit".to_string(), serde_json::json!(limit));
         }
         if let Some(include_payload) = include_payload {
-            params.insert("includePayload".to_string(), serde_json::json!(include_payload));
+            params.insert(
+                "includePayload".to_string(),
+                serde_json::json!(include_payload),
+            );
         }
 
-        let response = self.call("trp.peekPending", serde_json::Value::Object(params)).await?;
+        let response = self
+            .call("trp.peekPending", serde_json::Value::Object(params))
+            .await?;
 
         let out = serde_json::from_value(response)
             .map_err(|e| Error::DeserializationError(e.to_string()))?;
@@ -617,7 +627,7 @@ impl Client {
     /// let inflight = client.peek_inflight(Some(50), Some(false)).await?;
     ///
     /// for tx in inflight.entries {
-    ///     println!("{}: {:?} ({} confirmations)", 
+    ///     println!("{}: {:?} ({} confirmations)",
     ///         tx.hash, tx.stage, tx.confirmations);
     /// }
     /// ```
@@ -631,10 +641,15 @@ impl Client {
             params.insert("limit".to_string(), serde_json::json!(limit));
         }
         if let Some(include_payload) = include_payload {
-            params.insert("includePayload".to_string(), serde_json::json!(include_payload));
+            params.insert(
+                "includePayload".to_string(),
+                serde_json::json!(include_payload),
+            );
         }
 
-        let response = self.call("trp.peekInflight", serde_json::Value::Object(params)).await?;
+        let response = self
+            .call("trp.peekInflight", serde_json::Value::Object(params))
+            .await?;
 
         let out = serde_json::from_value(response)
             .map_err(|e| Error::DeserializationError(e.to_string()))?;
