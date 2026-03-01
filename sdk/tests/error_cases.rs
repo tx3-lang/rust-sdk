@@ -4,16 +4,16 @@
 //!
 //! # Running Tests
 //!
-//! To run these tests, you need to set the `TRP_ENDPOINT` environment variable:
+//! To run these tests, you need to set the `TRP_ENDPOINT_PREPROD` environment variable:
 //!
 //! ```bash
-//! TRP_ENDPOINT=https://trp.example.com cargo test --test error_cases
+//! TRP_ENDPOINT_PREPROD=https://trp.example.com cargo test --test error_cases
 //! ```
 //!
 //! Optional environment variables:
-//! - `DMTR_API_KEY` - API key for authentication (if required by endpoint)
+//! - `TRP_API_KEY_PREPROD` - API key for authentication (if required by endpoint)
 //!
-//! If `TRP_ENDPOINT` is not set, tests will be skipped automatically.
+//! If `TRP_ENDPOINT_PREPROD` is not set, tests will be skipped automatically.
 
 use std::collections::HashMap;
 use std::env;
@@ -23,24 +23,24 @@ use tx3_sdk::trp::{Client, ClientOptions, ResolveParams};
 /// Gets the TRP endpoint from environment variable.
 /// Returns None if not set, which will cause tests to skip.
 fn get_trp_endpoint() -> Option<String> {
-    env::var("TRP_ENDPOINT").ok()
+    env::var("TRP_ENDPOINT_PREPROD").ok()
 }
 
-/// Gets the DMTR API key from environment variable.
+/// Gets the TRP API key from environment variable.
 /// Returns None if not set.
-fn get_dmtr_api_key() -> Option<String> {
-    env::var("DMTR_API_KEY").ok()
+fn get_trp_api_key() -> Option<String> {
+    env::var("TRP_API_KEY_PREPROD").ok()
 }
 
 /// Creates a TRP client using the endpoint from environment.
-/// If DMTR_API_KEY is set, it will be included as a header.
+/// If TRP_API_KEY_PREPROD is set, it will be included as a header.
 fn create_trp_client() -> Option<Client> {
     get_trp_endpoint().map(|endpoint| {
         let mut headers = HashMap::new();
 
-        // Add DMTR API key header if available
-        if let Some(api_key) = get_dmtr_api_key() {
-            headers.insert("dmtr-api-key".to_string(), api_key);
+        // Add TRP API key header if available
+        if let Some(api_key) = get_trp_api_key() {
+            headers.insert("trp-api-key".to_string(), api_key);
         }
 
         Client::new(ClientOptions {
@@ -57,7 +57,7 @@ fn create_trp_client() -> Option<Client> {
 #[tokio::test]
 async fn test_trp_resolve_invalid_tir() {
     let Some(client) = create_trp_client() else {
-        println!("Skipping test_trp_resolve_invalid_tir: TRP_ENDPOINT not set");
+        println!("Skipping test_trp_resolve_invalid_tir: TRP_ENDPOINT_PREPROD not set");
         return;
     };
 

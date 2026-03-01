@@ -8,22 +8,22 @@
 //! To run this test, you need to set the following environment variables:
 //!
 //! ```bash
-//! TRP_ENDPOINT=https://trp.example.com \
-//! TRP_TEST_PARTY=addr_test1... \
-//! TRP_TEST_MNEMONIC="word1 word2 ... word24" \
-//! DMTR_API_KEY=your-api-key \
+//! TRP_ENDPOINT_PREPROD=https://trp.example.com \
+//! TEST_PARTY_A_ADDRESS=addr_test1... \
+//! TEST_PARTY_A_MNEMONIC="word1 word2 ... word24" \
+//! TRP_API_KEY_PREPROD=your-api-key \
 //! cargo test --test happy_path
 //! ```
 //!
 //! Required environment variables:
-//! - `TRP_ENDPOINT` - The TRP server URL
-//! - `TRP_TEST_PARTY` - Address used for sender/receiver/middleman (must have UTXOs available)
-//! - `TRP_TEST_MNEMONIC` - BIP39 mnemonic phrase (12-24 words)
+//! - `TRP_ENDPOINT_PREPROD` - The TRP server URL
+//! - `TEST_PARTY_A_ADDRESS` - Address used for sender/receiver/middleman (must have UTXOs available)
+//! - `TEST_PARTY_A_MNEMONIC` - BIP39 mnemonic phrase (12-24 words)
 //!
 //! Optional environment variables:
-//! - `DMTR_API_KEY` - API key for authentication (if required by endpoint)
+//! - `TRP_API_KEY_PREPROD` - API key for authentication (if required by endpoint)
 //!
-//! If `TRP_ENDPOINT` is not set, the test will be skipped automatically.
+//! If `TRP_ENDPOINT_PREPROD` is not set, the test will be skipped automatically.
 
 use std::collections::HashMap;
 use std::env;
@@ -47,26 +47,26 @@ fn get_required_env(var: &str) -> Option<String> {
 /// Gets required test configuration.
 /// Returns None if any required variable is missing.
 fn get_test_config() -> Option<(String, String)> {
-    let party = get_required_env("TRP_TEST_PARTY")?;
-    let mnemonic = get_required_env("TRP_TEST_MNEMONIC")?;
+    let party = get_required_env("TEST_PARTY_A_ADDRESS")?;
+    let mnemonic = get_required_env("TEST_PARTY_A_MNEMONIC")?;
     Some((party, mnemonic))
 }
 
 /// Gets the DMTR API key from environment variable.
 /// Returns None if not set.
-fn get_dmtr_api_key() -> Option<String> {
-    env::var("DMTR_API_KEY").ok()
+fn get_trp_api_key() -> Option<String> {
+    env::var("TRP_API_KEY_PREPROD").ok()
 }
 
 /// Creates a TRP client using the endpoint from environment.
-/// If DMTR_API_KEY is set, it will be included as a header.
+/// If TRP_API_KEY_PREPROD is set, it will be included as a header.
 fn create_trp_client() -> Option<Client> {
-    let endpoint = get_required_env("TRP_ENDPOINT")?;
+    let endpoint = get_required_env("TRP_ENDPOINT_PREPROD")?;
     let mut headers = HashMap::new();
 
-    // Add DMTR API key header if available
-    if let Some(api_key) = get_dmtr_api_key() {
-        headers.insert("dmtr-api-key".to_string(), api_key);
+    // Add TRP API key header if available
+    if let Some(api_key) = get_trp_api_key() {
+        headers.insert("trp-api-key".to_string(), api_key);
     }
 
     Some(Client::new(ClientOptions {
@@ -96,13 +96,13 @@ fn load_transfer_protocol() -> Protocol {
 async fn test_trp_happy_path_lifecycle() {
     // Check required configuration
     let Some(trp) = create_trp_client() else {
-        println!("Skipping test: TRP_ENDPOINT not set");
+        println!("Skipping test: TRP_ENDPOINT_PREPROD not set");
         return;
     };
 
     let Some((party, mnemonic)) = get_test_config() else {
         println!("Skipping test: Missing required test configuration");
-        println!("Required: TRP_TEST_PARTY, TRP_TEST_MNEMONIC");
+        println!("Required: TEST_PARTY_A_ADDRESS, TEST_PARTY_A_MNEMONIC");
         return;
     };
 

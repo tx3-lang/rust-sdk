@@ -36,17 +36,17 @@ jobs:
       - name: Run error case tests
         working-directory: ./sdk
         env:
-          TRP_ENDPOINT: ${{ secrets.TRP_ENDPOINT }}
-          DMTR_API_KEY: ${{ secrets.DMTR_API_KEY }}
+          TRP_ENDPOINT_PREPROD: ${{ secrets.TRP_ENDPOINT_PREPROD }}
+          TRP_API_KEY_PREPROD: ${{ secrets.TRP_API_KEY_PREPROD }}
         run: cargo test --test error_cases
 
       - name: Run happy path lifecycle test
         working-directory: ./sdk
         env:
-          TRP_ENDPOINT: ${{ secrets.TRP_ENDPOINT }}
-          TRP_TEST_PARTY: ${{ secrets.TRP_TEST_PARTY }}
-          TRP_TEST_MNEMONIC: ${{ secrets.TRP_TEST_MNEMONIC }}
-          DMTR_API_KEY: ${{ secrets.DMTR_API_KEY }}
+          TRP_ENDPOINT_PREPROD: ${{ secrets.TRP_ENDPOINT_PREPROD }}
+          TEST_PARTY_A_ADDRESS: ${{ secrets.TEST_PARTY_A_ADDRESS }}
+          TEST_PARTY_A_MNEMONIC: ${{ secrets.TEST_PARTY_A_MNEMONIC }}
+          TRP_API_KEY_PREPROD: ${{ secrets.TRP_API_KEY_PREPROD }}
         run: cargo test --test happy_path -- --nocapture
 
       - name: Test summary
