@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: '0 2 * * *'  # Daily at 2 AM UTC (nightly)
+    - cron: "0 2 * * *" # Daily at 2 AM UTC (nightly)
 
 env:
   CARGO_TERM_COLOR: always
@@ -15,7 +15,7 @@ jobs:
   integration-tests:
     name: Run Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # Generous timeout for test completion
+    timeout-minutes: 15 # Generous timeout for test completion
 
     steps:
       - name: Checkout repository
@@ -49,10 +49,15 @@ jobs:
           TRP_API_KEY_PREPROD: ${{ secrets.TRP_API_KEY_PREPROD }}
         run: cargo test --test happy_path -- --nocapture
 
+      - name: Run tx3c codegen test
+        working-directory: ./sdk
+        run: cargo test --test codegen
+
       - name: Test summary
         if: always()
         run: |
           echo "=== Integration Tests Summary ==="
           echo "Error case tests: Complete"
           echo "Happy path test: Complete"
+          echo "Tx3c codegen test: Complete"
           echo "All TRP integration tests executed successfully"
