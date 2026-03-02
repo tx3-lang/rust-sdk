@@ -33,6 +33,13 @@ jobs:
             ~/.cargo/git
             target
 
+      - name: Install tx3 toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/tx3-lang/up/releases/latest/download/tx3up-installer.sh | sh
+          tx3up
+          tx3up show
+          tx3c --version
+
       - name: Run error case tests
         working-directory: ./sdk
         env:
