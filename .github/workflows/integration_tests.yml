@@ -41,7 +41,13 @@ jobs:
           curl --proto '=https' --tlsv1.2 -LsSf https://github.com/tx3-lang/up/releases/latest/download/tx3up-installer.sh | sh
           tx3up
           tx3up show
-          tx3c --version
+          if [ -x "$HOME/.tx3/bin/tx3c" ]; then
+            "$HOME/.tx3/bin/tx3c" --version
+            echo "$HOME/.tx3/bin" >> "$GITHUB_PATH"
+          else
+            echo "tx3c not found at $HOME/.tx3/bin/tx3c" >&2
+            exit 1
+          fi
 
       - name: Run error case tests
         working-directory: ./sdk
