@@ -68,12 +68,3 @@ jobs:
       - name: Run tx3c codegen test
         working-directory: ./sdk
         run: cargo test --test codegen
-
-      - name: Test summary
-        if: always()
-        run: |
-          echo "=== Integration Tests Summary ==="
-          echo "Error case tests: Complete"
-          echo "Happy path test: Complete"
-          echo "Tx3c codegen test: Complete"
-          echo "All TRP integration tests executed successfully"
