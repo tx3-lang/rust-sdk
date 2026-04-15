@@ -1,6 +1,4 @@
 /target
 .DS_Store
 .opencode
-.env
-*.env
 .scratchpad

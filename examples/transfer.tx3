@@ -13,7 +13,7 @@ tx transfer(
 ) {
     input source {
         from: Sender,
-        min_amount: Ada(quantity + tax),
+        min_amount: Ada(quantity + tax) + fees,
     }
 
     output {
