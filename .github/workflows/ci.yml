@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  unit:
+    name: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run lint checks
+        working-directory: ./sdk
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run deterministic unit tests
+        working-directory: ./sdk
+        run: cargo test --lib --test smoke
+
+  integration:
+    name: integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TRP_ENDPOINT_PREPROD: ${{ secrets.TRP_ENDPOINT_PREPROD }}
+      TEST_PARTY_A_ADDRESS: ${{ secrets.TEST_PARTY_A_ADDRESS }}
+      TEST_PARTY_A_MNEMONIC: ${{ secrets.TEST_PARTY_A_MNEMONIC }}
+      TRP_API_KEY_PREPROD: ${{ secrets.TRP_API_KEY_PREPROD }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run happy-path integration tests
+        working-directory: ./sdk
+        run: cargo test --test happy_path -- --nocapture
+
+      - name: Run error-case integration tests
+        working-directory: ./sdk
+        run: cargo test --test error_cases
