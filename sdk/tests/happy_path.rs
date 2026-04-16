@@ -46,10 +46,12 @@ fn get_required_env(var: &str) -> Option<String> {
 
 /// Gets required test configuration.
 /// Returns None if any required variable is missing.
-fn get_test_config() -> Option<(String, String)> {
-    let party = get_required_env("TEST_PARTY_A_ADDRESS")?;
-    let mnemonic = get_required_env("TEST_PARTY_A_MNEMONIC")?;
-    Some((party, mnemonic))
+fn get_test_config() -> Option<(String, String, String)> {
+    let party_a = get_required_env("TEST_PARTY_A_ADDRESS")?;
+    let mnemonic_a = get_required_env("TEST_PARTY_A_MNEMONIC")?;
+    let party_b = env::var("TEST_PARTY_B_ADDRESS").unwrap_or_else(|_| party_a.clone());
+    let _mnemonic_b = env::var("TEST_PARTY_B_MNEMONIC").unwrap_or_else(|_| mnemonic_a.clone());
+    Some((party_a, mnemonic_a, party_b))
 }
 
 /// Gets the DMTR API key from environment variable.
@@ -100,7 +102,7 @@ async fn test_trp_happy_path_lifecycle() {
         return;
     };
 
-    let Some((party, mnemonic)) = get_test_config() else {
+    let Some((party_a, mnemonic_a, party_b)) = get_test_config() else {
         println!("Skipping test: Missing required test configuration");
         println!("Required: TEST_PARTY_A_ADDRESS, TEST_PARTY_A_MNEMONIC");
         return;
@@ -108,13 +110,13 @@ async fn test_trp_happy_path_lifecycle() {
 
     let protocol = load_transfer_protocol();
     let signer =
-        CardanoSigner::from_mnemonic(&party, &mnemonic).expect("Invalid mnemonic or address");
+        CardanoSigner::from_mnemonic(&party_a, &mnemonic_a).expect("Invalid mnemonic or address");
 
     let tx3 = Tx3Client::new(protocol, trp.clone())
         .with_profile("preprod")
         .with_party("sender", Party::signer(signer))
-        .with_party("middleman", Party::address(&party))
-        .with_party("receiver", Party::address(&party));
+        .with_party("middleman", Party::address(&party_b))
+        .with_party("receiver", Party::address(&party_b));
 
     let resolved = tx3
         .tx("transfer")
