@@ -134,7 +134,7 @@ let client = Client::new(ClientOptions {
 ## Testing
 
 - Unit tests are co-located with modules via `#[cfg(test)]`.
-- Integration tests are under `sdk/tests/` and run as Cargo integration targets.
+- End-to-end (e2e) tests are under `sdk/tests/` and run as Cargo test targets.
 
 ```bash
 # from rust-sdk/sdk

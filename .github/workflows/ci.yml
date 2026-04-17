@@ -32,8 +32,8 @@ jobs:
         working-directory: ./sdk
         run: cargo test --lib
 
-  integration:
-    name: integration
+  e2e:
+    name: e2e
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -56,15 +56,15 @@ jobs:
       - name: Setup tx3 toolchain
         uses: tx3-lang/actions/setup@v1
 
-      - name: Validate integration secrets
+      - name: Validate e2e secrets
         run: |
           for name in TRP_ENDPOINT_PREPROD TRP_API_KEY_PREPROD TEST_PARTY_A_ADDRESS TEST_PARTY_A_MNEMONIC TEST_PARTY_B_ADDRESS TEST_PARTY_B_MNEMONIC; do
             if [ -z "${!name}" ]; then
-              echo "Missing required integration env var: $name"
+              echo "Missing required e2e env var: $name"
               exit 1
             fi
           done
 
-      - name: Run integration tests
+      - name: Run e2e tests
         working-directory: ./sdk
         run: cargo test --test smoke --test codegen --test error_cases --test happy_path

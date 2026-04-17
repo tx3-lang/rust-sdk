@@ -1,4 +1,4 @@
-//! Happy path integration test for the TRP (Transaction Resolution Protocol) client.
+//! Happy path end-to-end (e2e) test for the TRP (Transaction Resolution Protocol) client.
 //!
 //! This test follows a single transfer transaction through its complete lifecycle
 //! from resolution to finalization using the ergonomic facade.

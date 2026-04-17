@@ -1,4 +1,4 @@
-//! Error case integration tests for the TRP (Transaction Resolution Protocol) client.
+//! Error case end-to-end (e2e) tests for the TRP (Transaction Resolution Protocol) client.
 //!
 //! These tests verify error handling and edge cases when interacting with a TRP server.
 //!
