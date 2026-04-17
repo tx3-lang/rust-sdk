@@ -583,7 +583,7 @@ mod tests {
 
         let protocol = Protocol::from_file(&tii).unwrap();
 
-        let invoke = protocol.invoke("transfer", Some("preview")).unwrap();
+        let invoke = protocol.invoke("transfer", Some("preprod")).unwrap();
 
         let mut invoke = invoke
             .with_arg("sender", json!("addr1abc"))
@@ -600,7 +600,8 @@ mod tests {
 
         let unspecified_params: HashSet<_> = invoke.unspecified_params().map(|(k, _)| k).collect();
 
-        assert_eq!(unspecified_params.len(), 1);
+        assert_eq!(unspecified_params.len(), 2);
+        assert!(unspecified_params.contains(&"middleman".to_string()));
         assert!(unspecified_params.contains(&"receiver".to_string()));
 
         let tx = invoke.into_resolve_request().unwrap();
