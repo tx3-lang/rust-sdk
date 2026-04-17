@@ -131,6 +131,17 @@ let client = Client::new(ClientOptions {
 // ... build ResolveParams and call client.resolve(...)
 ```
 
+## Testing
+
+- Unit tests are co-located with modules via `#[cfg(test)]`.
+- Integration tests are under `sdk/tests/` and run as Cargo integration targets.
+
+```bash
+# from rust-sdk/sdk
+cargo test --lib
+cargo test --test smoke --test codegen --test error_cases --test happy_path
+```
+
 ## License
 
 Apache-2.0

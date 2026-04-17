@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  unit:
+    name: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run unit tests
+        working-directory: ./sdk
+        run: cargo test --lib
+
+  integration:
+    name: integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TRP_ENDPOINT_PREPROD: ${{ secrets.TRP_ENDPOINT_PREPROD }}
+      TRP_API_KEY_PREPROD: ${{ secrets.TRP_API_KEY_PREPROD }}
+      TEST_PARTY_A_ADDRESS: ${{ secrets.TEST_PARTY_A_ADDRESS }}
+      TEST_PARTY_A_MNEMONIC: ${{ secrets.TEST_PARTY_A_MNEMONIC }}
+      TEST_PARTY_B_ADDRESS: ${{ secrets.TEST_PARTY_B_ADDRESS }}
+      TEST_PARTY_B_MNEMONIC: ${{ secrets.TEST_PARTY_B_MNEMONIC }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup tx3 toolchain
+        uses: tx3-lang/actions/setup@v1
+
+      - name: Validate integration secrets
+        run: |
+          for name in TRP_ENDPOINT_PREPROD TRP_API_KEY_PREPROD TEST_PARTY_A_ADDRESS TEST_PARTY_A_MNEMONIC TEST_PARTY_B_ADDRESS TEST_PARTY_B_MNEMONIC; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required integration env var: $name"
+              exit 1
+            fi
+          done
+
+      - name: Run integration tests
+        working-directory: ./sdk
+        run: cargo test --test smoke --test codegen --test error_cases --test happy_path
