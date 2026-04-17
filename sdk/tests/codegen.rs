@@ -30,7 +30,7 @@ fn assert_file_exists(path: &Path) {
 #[test]
 fn test_tx3c_codegen_client_lib_template() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let tii_path = PathBuf::from(manifest_dir).join("../examples/transfer.tii");
+    let tii_path = PathBuf::from(manifest_dir).join("tests/fixtures/transfer.tii");
     let template_dir = PathBuf::from(manifest_dir).join("../.trix/client-lib");
 
     assert!(

@@ -579,7 +579,7 @@ mod tests {
     #[test]
     fn happy_path_smoke_test() {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let tii = format!("{manifest_dir}/../examples/transfer.tii");
+        let tii = format!("{manifest_dir}/tests/fixtures/transfer.tii");
 
         let protocol = Protocol::from_file(&tii).unwrap();
 

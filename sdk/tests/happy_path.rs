@@ -84,7 +84,7 @@ fn create_trp_client() -> Option<Client> {
 /// Loads the transfer.tii protocol file.
 fn load_transfer_protocol() -> Protocol {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let tii_path = format!("{manifest_dir}/../examples/transfer.tii");
+    let tii_path = format!("{manifest_dir}/tests/fixtures/transfer.tii");
     Protocol::from_file(&tii_path).expect("Failed to load transfer.tii")
 }
 
