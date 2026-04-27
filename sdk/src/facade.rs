@@ -81,6 +81,20 @@ impl Default for PollConfig {
     }
 }
 
+/// Inputs passed to a [`Signer`] for each sign call.
+///
+/// Carries both the bound tx hash and the full hex-encoded tx CBOR. Hash-based
+/// signers (Cardano, Ed25519) read `tx_hash_hex`; tx-based signers (e.g. wallet
+/// adapters that need the full tx body) read `tx_cbor_hex`. The SDK always
+/// populates both fields.
+#[derive(Debug, Clone)]
+pub struct SignRequest {
+    /// Hex-encoded tx hash bound to this signing call.
+    pub tx_hash_hex: String,
+    /// Hex-encoded full tx CBOR.
+    pub tx_cbor_hex: String,
+}
+
 /// A signer capable of producing TRP witnesses.
 ///
 /// Signers are address-aware and must return the address they correspond to.
@@ -88,8 +102,11 @@ pub trait Signer: Send + Sync {
     /// Returns the address associated with this signer.
     fn address(&self) -> &str;
 
-    /// Signs a transaction hash given as hex-encoded bytes.
-    fn sign(&self, tx_hash: &str) -> Result<TxWitness, Box<dyn std::error::Error + Send + Sync>>;
+    /// Signs the transaction described by `request`.
+    fn sign(
+        &self,
+        request: &SignRequest,
+    ) -> Result<TxWitness, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 /// A party referenced by the protocol.
@@ -285,6 +302,7 @@ impl TxBuilder {
             hash: envelope.hash,
             tx_hex: envelope.tx,
             signers,
+            manual_witnesses: Vec::new(),
         })
     }
 }
@@ -297,6 +315,7 @@ pub struct ResolvedTx {
     /// Hex-encoded CBOR transaction bytes.
     pub tx_hex: String,
     signers: Vec<SignerParty>,
+    manual_witnesses: Vec<TxWitness>,
 }
 
 impl ResolvedTx {
@@ -305,19 +324,57 @@ impl ResolvedTx {
         &self.hash
     }
 
+    /// Attaches a pre-computed witness produced outside any registered `Signer`.
+    ///
+    /// This is the canonical entry point for wallet-app integrations: the consumer
+    /// hands `txHex` (or `hash`) to an external wallet, gets back a witness, and
+    /// attaches it before calling `sign()`. The witness is appended to the TRP
+    /// `SubmitParams.witnesses` array after any witnesses produced by registered
+    /// signer parties, in attach order. May be called any number of times.
+    ///
+    /// The SDK does not verify the witness against the tx hash; that binding is
+    /// enforced by TRP at submit time.
+    pub fn add_witness(mut self, witness: TxWitness) -> Self {
+        self.manual_witnesses.push(witness);
+        self
+    }
+
     /// Signs the transaction with every signer party.
+    ///
+    /// Manually attached witnesses (via `add_witness`) are appended after
+    /// witnesses produced by registered signer parties, in attach order.
+    /// Succeeds with zero registered signers when at least one witness has
+    /// been manually attached.
     pub fn sign(self) -> Result<SignedTx, Error> {
-        let mut witnesses = Vec::with_capacity(self.signers.len());
-        let mut witnesses_info = Vec::with_capacity(self.signers.len());
+        let total = self.signers.len() + self.manual_witnesses.len();
+        let mut witnesses = Vec::with_capacity(total);
+        let mut witnesses_info = Vec::with_capacity(total);
+
+        let request = SignRequest {
+            tx_hash_hex: self.hash.clone(),
+            tx_cbor_hex: self.tx_hex.clone(),
+        };
 
         for signer_party in &self.signers {
             let witness = signer_party
                 .signer
-                .sign(&self.hash)
+                .sign(&request)
                 .map_err(Error::Signer)?;
             witnesses_info.push(WitnessInfo {
                 party: signer_party.name.clone(),
                 address: signer_party.address.clone(),
+                key: witness.key.clone(),
+                signature: witness.signature.clone(),
+                witness_type: witness.witness_type.clone(),
+                signed_hash: self.hash.clone(),
+            });
+            witnesses.push(witness);
+        }
+
+        for witness in self.manual_witnesses {
+            witnesses_info.push(WitnessInfo {
+                party: "<external>".to_string(),
+                address: String::new(),
                 key: witness.key.clone(),
                 signature: witness.signature.clone(),
                 witness_type: witness.witness_type.clone(),
@@ -446,7 +503,7 @@ impl SubmittedTx {
 
 /// Signer implementations.
 pub mod signer {
-    use super::Signer;
+    use super::{SignRequest, Signer};
     use crate::core::BytesEnvelope;
     use crate::trp::{TxWitness, WitnessType};
     use cryptoxide::hmac::Hmac;
@@ -670,9 +727,9 @@ pub mod signer {
 
         fn sign(
             &self,
-            tx_hash: &str,
+            request: &SignRequest,
         ) -> Result<TxWitness, Box<dyn std::error::Error + Send + Sync>> {
-            let hash_bytes = hex::decode(tx_hash).map_err(|err| {
+            let hash_bytes = hex::decode(&request.tx_hash_hex).map_err(|err| {
                 Box::new(SignerError::InvalidHashHex(err))
                     as Box<dyn std::error::Error + Send + Sync>
             })?;
@@ -746,9 +803,9 @@ pub mod signer {
 
         fn sign(
             &self,
-            tx_hash: &str,
+            request: &SignRequest,
         ) -> Result<TxWitness, Box<dyn std::error::Error + Send + Sync>> {
-            let hash_bytes = hex::decode(tx_hash).map_err(|err| {
+            let hash_bytes = hex::decode(&request.tx_hash_hex).map_err(|err| {
                 Box::new(SignerError::InvalidHashHex(err))
                     as Box<dyn std::error::Error + Send + Sync>
             })?;
@@ -773,5 +830,126 @@ pub mod signer {
                 witness_type: WitnessType::VKey,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trp::{ClientOptions, WitnessType};
+
+    fn stub_trp() -> trp::Client {
+        trp::Client::new(ClientOptions {
+            endpoint: "http://localhost:0/unused".to_string(),
+            headers: None,
+        })
+    }
+
+    fn fake_witness(key_hex: &str, sig_hex: &str) -> TxWitness {
+        TxWitness {
+            key: BytesEnvelope {
+                content: key_hex.to_string(),
+                content_type: "hex".to_string(),
+            },
+            signature: BytesEnvelope {
+                content: sig_hex.to_string(),
+                content_type: "hex".to_string(),
+            },
+            witness_type: WitnessType::VKey,
+        }
+    }
+
+    fn empty_resolved() -> ResolvedTx {
+        ResolvedTx {
+            trp: stub_trp(),
+            hash: "deadbeef".to_string(),
+            tx_hex: "84a40081".to_string(),
+            signers: Vec::new(),
+            manual_witnesses: Vec::new(),
+        }
+    }
+
+    struct StubSigner {
+        address: String,
+        witness: TxWitness,
+    }
+
+    impl Signer for StubSigner {
+        fn address(&self) -> &str {
+            &self.address
+        }
+
+        fn sign(
+            &self,
+            _request: &SignRequest,
+        ) -> Result<TxWitness, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(self.witness.clone())
+        }
+    }
+
+    #[test]
+    fn add_witness_only_no_signers() {
+        let witness = fake_witness("aa", "bb");
+        let signed = empty_resolved()
+            .add_witness(witness.clone())
+            .sign()
+            .expect("sign with manual witness only must succeed");
+
+        assert_eq!(signed.submit.witnesses.len(), 1);
+        assert_eq!(signed.submit.witnesses[0].key.content, witness.key.content);
+        assert_eq!(
+            signed.submit.witnesses[0].signature.content,
+            witness.signature.content
+        );
+    }
+
+    #[test]
+    fn add_witness_mixed_with_registered_signer() {
+        let registered_witness = fake_witness("11", "22");
+        let manual_witness = fake_witness("aa", "bb");
+
+        let stub = StubSigner {
+            address: "addr_test1...".to_string(),
+            witness: registered_witness.clone(),
+        };
+
+        let resolved = ResolvedTx {
+            trp: stub_trp(),
+            hash: "deadbeef".to_string(),
+            tx_hex: "84a40081".to_string(),
+            signers: vec![SignerParty {
+                name: "sender".to_string(),
+                address: stub.address.clone(),
+                signer: Arc::new(stub),
+            }],
+            manual_witnesses: Vec::new(),
+        };
+
+        let signed = resolved
+            .add_witness(manual_witness.clone())
+            .sign()
+            .expect("sign with mixed witnesses must succeed");
+
+        assert_eq!(signed.submit.witnesses.len(), 2);
+        assert_eq!(signed.submit.witnesses[0].key.content, "11");
+        assert_eq!(signed.submit.witnesses[1].key.content, "aa");
+    }
+
+    #[test]
+    fn add_witness_preserves_attach_order() {
+        let signed = empty_resolved()
+            .add_witness(fake_witness("01", "10"))
+            .add_witness(fake_witness("02", "20"))
+            .add_witness(fake_witness("03", "30"))
+            .sign()
+            .expect("sign must succeed");
+
+        let keys: Vec<&str> = signed
+            .submit
+            .witnesses
+            .iter()
+            .map(|w| w.key.content.as_str())
+            .collect();
+        assert_eq!(keys, vec!["01", "02", "03"]);
     }
 }

@@ -54,6 +54,6 @@ pub mod trp;
 
 pub use facade::signer::{CardanoSigner, Ed25519Signer};
 pub use facade::{
-    Error, Party, PollConfig, ResolvedTx, SignedTx, Signer, SubmittedTx, Tx3Client, TxBuilder,
-    WitnessInfo,
+    Error, Party, PollConfig, ResolvedTx, SignRequest, SignedTx, Signer, SubmittedTx, Tx3Client,
+    TxBuilder, WitnessInfo,
 };
