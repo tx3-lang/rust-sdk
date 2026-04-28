@@ -136,17 +136,22 @@ impl Signer for MySigner {
 ### Manual witness attachment
 
 When a witness is produced outside any registered `Signer` — for example by an
-external wallet app or a remote signing service — attach it to the `ResolvedTx`
-before `sign()`:
+external wallet app or a remote signing service — resolve the transaction
+first, hand the resolved hash (or full tx CBOR) to the wallet, then attach the
+returned witness before `sign()`:
 
 ```rust
-let witness: tx3_sdk::trp::TxWitness = /* from external wallet */;
-
-let status = tx3
+let resolved = tx3
     .tx("transfer")
     .arg("quantity", json!(10_000_000))
     .resolve()
-    .await?
+    .await?;
+
+// Hand `resolved.hash` (or `resolved.tx_hex`) to the external wallet
+// and get back a witness. The wallet needs the resolved tx to sign.
+let witness: tx3_sdk::trp::TxWitness = /* sign resolved.hash with external wallet */;
+
+let status = resolved
     .add_witness(witness)
     .sign()?
     .submit()
