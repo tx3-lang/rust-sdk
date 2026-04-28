@@ -229,6 +229,10 @@ impl Protocol {
         Self::from_string(code)
     }
 
+    pub fn spec(&self) -> &spec::TiiFile {
+        &self.spec
+    }
+
     fn ensure_tx(&self, key: &str) -> Result<&Transaction, Error> {
         let tx = self.spec.transactions.get(key);
         let tx = tx.ok_or(Error::UnknownTx(key.to_string()))?;
@@ -607,5 +611,17 @@ mod tests {
         let tx = invoke.into_resolve_request().unwrap();
 
         dbg!(&tx);
+    }
+
+    #[test]
+    fn spec_is_accessible() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let tii = format!("{manifest_dir}/../examples/transfer.tii");
+
+        let protocol = Protocol::from_file(&tii).unwrap();
+        let spec = protocol.spec();
+
+        assert_eq!(spec.protocol.name, "unknown");
+        assert!(spec.transactions.contains_key("transfer"));
     }
 }
