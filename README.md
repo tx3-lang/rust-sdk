@@ -23,7 +23,7 @@ Or in `Cargo.toml`:
 
 ```toml
 [dependencies]
-tx3-sdk = "0.10"
+tx3-sdk = "0.11"
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 ```
