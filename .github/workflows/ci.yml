@@ -32,6 +32,26 @@ jobs:
         working-directory: ./sdk
         run: cargo test --lib
 
+  codegen:
+    name: codegen
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup tx3 toolchain
+        uses: tx3-lang/actions/setup@v1
+
+      - name: Render and verify codegen plugin
+        run: bash .github/scripts/codegen-check.sh
+
   e2e:
     name: e2e
     runs-on: ubuntu-latest
@@ -67,4 +87,4 @@ jobs:
 
       - name: Run e2e tests
         working-directory: ./sdk
-        run: cargo test --test smoke --test codegen --test error_cases --test happy_path
+        run: cargo test --test smoke --test error_cases --test happy_path
