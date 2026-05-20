@@ -28,9 +28,12 @@ jobs:
       - name: Cache cargo dependencies
         uses: Swatinem/rust-cache@v2
 
+      - name: Setup tx3 toolchain
+        uses: tx3-lang/actions/setup@v1
+
       - name: Run unit tests
         working-directory: ./sdk
-        run: cargo test --lib
+        run: cargo test --lib --test codegen
 
   e2e:
     name: e2e
@@ -67,4 +70,4 @@ jobs:
 
       - name: Run e2e tests
         working-directory: ./sdk
-        run: cargo test --test smoke --test codegen --test error_cases --test happy_path
+        run: cargo test --test smoke --test error_cases --test happy_path
