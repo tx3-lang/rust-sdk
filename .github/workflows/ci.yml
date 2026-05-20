@@ -30,6 +30,8 @@ jobs:
 
       - name: Setup tx3 toolchain
         uses: tx3-lang/actions/setup@v1
+        with:
+          channel: beta
 
       - name: Run unit tests
         working-directory: ./sdk
