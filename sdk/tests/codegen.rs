@@ -4,15 +4,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-fn resolve_tx3c_path() -> Option<PathBuf> {
+fn tx3c_command() -> Command {
     if let Ok(path) = env::var("TX3_TX3C_PATH") {
         let path = PathBuf::from(path);
         if path.is_file() {
-            return Some(path);
+            return Command::new(path);
         }
     }
-
-    None
+    Command::new("tx3c")
 }
 
 fn unique_output_dir() -> PathBuf {
@@ -46,13 +45,7 @@ fn test_tx3c_codegen_client_lib_template() {
 
     let output_dir = unique_output_dir();
 
-    let mut cmd = if let Some(tx3c_path) = resolve_tx3c_path() {
-        Command::new(tx3c_path)
-    } else {
-        Command::new("tx3c")
-    };
-
-    let output = cmd
+    let output = tx3c_command()
         .arg("codegen")
         .arg("--tii")
         .arg(&tii_path)
@@ -61,7 +54,7 @@ fn test_tx3c_codegen_client_lib_template() {
         .arg("--output")
         .arg(&output_dir)
         .output()
-        .expect("Failed to execute tx3c. Ensure tx3c is available.");
+        .expect("Failed to execute tx3c. Set TX3_TX3C_PATH or install tx3c.");
 
     if !output.status.success() {
         panic!(
@@ -72,8 +65,34 @@ fn test_tx3c_codegen_client_lib_template() {
     }
 
     assert!(output_dir.is_dir(), "Output directory not created");
-    assert_file_exists(&output_dir.join("Cargo.toml"));
+    let cargo_toml = output_dir.join("Cargo.toml");
+    assert_file_exists(&cargo_toml);
     assert_file_exists(&output_dir.join("lib.rs"));
 
+    // Point the generated crate at this repo's SDK so the check exercises the
+    // code under test rather than a published release.
+    let mut manifest = fs::read_to_string(&cargo_toml).expect("read generated Cargo.toml");
+    manifest.push_str(&format!(
+        "\n[patch.crates-io]\ntx3-sdk = {{ path = \"{manifest_dir}\" }}\n"
+    ));
+    fs::write(&cargo_toml, manifest).expect("write patched Cargo.toml");
+
+    // A successful render that produces uncompilable bindings is a failure.
+    let check = Command::new(env!("CARGO"))
+        .arg("check")
+        .arg("--manifest-path")
+        .arg(&cargo_toml)
+        .output()
+        .expect("Failed to execute cargo");
+
+    let check_ok = check.status.success();
     let _ = fs::remove_dir_all(&output_dir);
+
+    if !check_ok {
+        panic!(
+            "cargo check on generated bindings failed.\nSTDOUT:\n{}\nSTDERR:\n{}",
+            String::from_utf8_lossy(&check.stdout),
+            String::from_utf8_lossy(&check.stderr)
+        );
+    }
 }
