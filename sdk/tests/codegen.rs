@@ -69,6 +69,23 @@ fn test_tx3c_codegen_client_lib_template() {
     assert_file_exists(&cargo_toml);
     assert_file_exists(&output_dir.join("lib.rs"));
 
+    // Smoke-test the generated surface: the template must emit protocol
+    // identity, the per-transaction types, and the profile surface.
+    let lib_rs = fs::read_to_string(output_dir.join("lib.rs")).expect("read generated lib.rs");
+    for expected in [
+        "TARGET_TII_VERSION",
+        "pub struct TransferParams",
+        "pub fn transfer_tir",
+        "pub struct Client",
+        "pub async fn transfer",
+        "fn profiles()",
+    ] {
+        assert!(
+            lib_rs.contains(expected),
+            "generated lib.rs missing expected symbol: {expected}"
+        );
+    }
+
     // Point the generated crate at this repo's SDK so the check exercises the
     // code under test rather than a published release.
     let mut manifest = fs::read_to_string(&cargo_toml).expect("read generated Cargo.toml");

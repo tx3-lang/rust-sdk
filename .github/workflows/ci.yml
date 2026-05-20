@@ -28,14 +28,32 @@ jobs:
       - name: Cache cargo dependencies
         uses: Swatinem/rust-cache@v2
 
+      - name: Run unit tests
+        working-directory: ./sdk
+        run: cargo test --lib
+
+  codegen:
+    name: codegen
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
       - name: Setup tx3 toolchain
         uses: tx3-lang/actions/setup@v1
         with:
           channel: beta
 
-      - name: Run unit tests
+      - name: Run codegen render-fixture test
         working-directory: ./sdk
-        run: cargo test --lib --test codegen
+        run: cargo test --test codegen
 
   e2e:
     name: e2e
