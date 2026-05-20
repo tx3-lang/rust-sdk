@@ -3,11 +3,9 @@
 # CI artifact — not part of the SDK.
 #
 # Renders the .trix/client-lib codegen plugin against the shared transfer
-# fixture and verifies the result. The subject under test is the Handlebars
-# templates + tx3c integration, not the SDK runtime.
-#
-# Steps: invoke `tx3c codegen`, assert the expected files exist, smoke-check
-# the generated surface, and compile the output against this repo's SDK.
+# fixture and verifies the result the way a consumer would: the rendered crate
+# resolves the published `tx3-sdk` from crates.io at the version its generated
+# Cargo.toml pins — no patches or path overrides.
 #
 # Requires `tx3c` and `cargo` on PATH.
 set -euo pipefail
@@ -34,8 +32,6 @@ for sym in \
   grep -qF "$sym" "$gen/lib.rs" || { echo "generated lib.rs missing: $sym"; exit 1; }
 done
 
-# Check the rendered crate against this repo's SDK, not a published release.
-printf '\n[patch.crates-io]\ntx3-sdk = { path = "%s/sdk" }\n' "$repo_root" >> "$gen/Cargo.toml"
 cargo check --manifest-path "$gen/Cargo.toml"
 
 echo "codegen check passed"
