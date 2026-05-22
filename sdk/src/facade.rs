@@ -10,9 +10,9 @@ use std::time::Duration;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::core::{ArgMap, BytesEnvelope};
+use crate::core::{ArgMap, BytesEnvelope, EnvMap, TirEnvelope};
 use crate::tii::Protocol;
-use crate::trp::{self, SubmitParams, TxStage, TxStatus, TxWitness};
+use crate::trp::{self, ResolveParams, SubmitParams, TxStage, TxStatus, TxWitness};
 
 #[derive(Clone)]
 struct SignerParty {
@@ -217,27 +217,111 @@ impl Tx3Client {
     /// Starts building a transaction invocation.
     pub fn tx(&self, name: impl Into<String>) -> TxBuilder {
         TxBuilder {
-            protocol: Arc::clone(&self.protocol),
+            source: TxSource::Protocol {
+                protocol: Arc::clone(&self.protocol),
+                tx_name: name.into(),
+                profile: self.profile.clone(),
+            },
             trp: self.trp.clone(),
-            tx_name: name.into(),
             args: ArgMap::new(),
             parties: self.parties.clone(),
-            profile: self.profile.clone(),
         }
+    }
+}
+
+/// Source of the transaction template driven by a [`TxBuilder`].
+enum TxSource {
+    /// Backed by a loaded [`Protocol`] — the dynamic path used by [`Tx3Client`].
+    Protocol {
+        protocol: Arc<Protocol>,
+        tx_name: String,
+        profile: Option<String>,
+    },
+    /// Backed by an embedded TIR envelope — the codegen path, which carries no
+    /// [`Protocol`] at runtime.
+    Embedded { tir: TirEnvelope, env: EnvMap },
+}
+
+/// Assembles the TRP resolve request for the embedded (codegen) path.
+///
+/// Mirrors what [`Protocol::invoke`] + [`crate::tii::Invocation::into_resolve_request`]
+/// produce for the dynamic path: profile environment values and party addresses
+/// are folded into `args`, and `env` is left unset (TRP receives a single
+/// argument map). Caller-supplied `args` win over both.
+fn build_embedded_resolve_params(
+    tir: TirEnvelope,
+    env: EnvMap,
+    parties: &HashMap<String, Party>,
+    args: ArgMap,
+) -> ResolveParams {
+    let mut merged = ArgMap::new();
+    merged.extend(env);
+    for (name, party) in parties {
+        merged.insert(
+            name.clone(),
+            Value::String(party.address_value().to_string()),
+        );
+    }
+    merged.extend(args);
+
+    ResolveParams {
+        tir,
+        args: merged,
+        env: None,
     }
 }
 
 /// Builder for transaction invocation.
 pub struct TxBuilder {
-    protocol: Arc<Protocol>,
+    source: TxSource,
     trp: trp::Client,
-    tx_name: String,
     args: ArgMap,
     parties: HashMap<String, Party>,
-    profile: Option<String>,
 }
 
 impl TxBuilder {
+    /// Creates a builder from an embedded TIR envelope, without a [`Protocol`].
+    ///
+    /// This is the entry point used by generated codegen clients: they embed the
+    /// per-transaction TIR and profile data at codegen time and drive the full
+    /// `resolve → sign → submit → wait` lifecycle without loading a `.tii` file.
+    /// Supply environment values with [`TxBuilder::env`] and signer/address
+    /// bindings with [`TxBuilder::parties`].
+    pub fn from_embedded(tir: TirEnvelope, trp: trp::Client) -> Self {
+        TxBuilder {
+            source: TxSource::Embedded {
+                tir,
+                env: EnvMap::new(),
+            },
+            trp,
+            args: ArgMap::new(),
+            parties: HashMap::new(),
+        }
+    }
+
+    /// Sets the environment values applied to this transaction.
+    ///
+    /// Only meaningful for builders created via [`TxBuilder::from_embedded`].
+    /// `Protocol`-backed builders derive the environment from the selected
+    /// profile and ignore this call.
+    pub fn env(mut self, env: EnvMap) -> Self {
+        if let TxSource::Embedded { env: slot, .. } = &mut self.source {
+            *slot = env;
+        }
+        self
+    }
+
+    /// Attaches party definitions (signers or read-only addresses).
+    ///
+    /// Names are matched case-insensitively. Later entries override earlier
+    /// ones with the same name.
+    pub fn parties(mut self, parties: HashMap<String, Party>) -> Self {
+        for (name, party) in parties {
+            self.parties.insert(name.to_lowercase(), party);
+        }
+        self
+    }
+
     /// Adds a single argument (case-insensitive name).
     pub fn arg(mut self, name: &str, value: impl Into<Value>) -> Self {
         self.args.insert(name.to_lowercase(), value.into());
@@ -254,51 +338,66 @@ impl TxBuilder {
 
     /// Resolves the transaction using the TRP client.
     pub async fn resolve(self) -> Result<ResolvedTx, Error> {
-        let mut invocation = self
-            .protocol
-            .invoke(&self.tx_name, self.profile.as_deref())?;
+        let TxBuilder {
+            source,
+            trp,
+            args,
+            parties,
+        } = self;
 
-        let known_parties: HashSet<String> = self
-            .protocol
-            .parties()
-            .keys()
-            .map(|key| key.to_lowercase())
-            .collect();
+        let resolve_params = match source {
+            TxSource::Protocol {
+                protocol,
+                tx_name,
+                profile,
+            } => {
+                let mut invocation = protocol.invoke(&tx_name, profile.as_deref())?;
 
-        for (name, party) in &self.parties {
-            if !known_parties.contains(name) {
-                return Err(Error::UnknownParty(name.clone()));
+                let known_parties: HashSet<String> = protocol
+                    .parties()
+                    .keys()
+                    .map(|key| key.to_lowercase())
+                    .collect();
+
+                for (name, party) in &parties {
+                    if !known_parties.contains(name) {
+                        return Err(Error::UnknownParty(name.clone()));
+                    }
+
+                    invocation.set_arg(
+                        name,
+                        Value::String(party.address_value().to_string()),
+                    );
+                }
+
+                invocation.set_args(args);
+
+                let mut missing: Vec<String> = invocation
+                    .unspecified_params()
+                    .map(|(key, _)| key.clone())
+                    .collect();
+
+                if !missing.is_empty() {
+                    missing.sort();
+                    return Err(Error::MissingParams(missing));
+                }
+
+                invocation.into_resolve_request()?
             }
+            TxSource::Embedded { tir, env } => {
+                build_embedded_resolve_params(tir, env, &parties, args)
+            }
+        };
 
-            invocation.set_arg(
-                name,
-                serde_json::Value::String(party.address_value().to_string()),
-            );
-        }
+        let envelope = trp.resolve(resolve_params).await?;
 
-        invocation.set_args(self.args);
-
-        let mut missing: Vec<String> = invocation
-            .unspecified_params()
-            .map(|(key, _)| key.clone())
-            .collect();
-
-        if !missing.is_empty() {
-            missing.sort();
-            return Err(Error::MissingParams(missing));
-        }
-
-        let resolve_params = invocation.into_resolve_request()?;
-        let envelope = self.trp.resolve(resolve_params).await?;
-
-        let signers = self
-            .parties
+        let signers = parties
             .iter()
             .filter_map(|(name, party)| party.signer_party(name))
             .collect();
 
         Ok(ResolvedTx {
-            trp: self.trp,
+            trp,
             hash: envelope.hash,
             tx_hex: envelope.tx,
             signers,
@@ -951,5 +1050,79 @@ mod tests {
             .map(|w| w.key.content.as_str())
             .collect();
         assert_eq!(keys, vec!["01", "02", "03"]);
+    }
+
+    fn sample_tir() -> TirEnvelope {
+        TirEnvelope {
+            content: "abcd".to_string(),
+            encoding: crate::core::TirEncoding::Hex,
+            version: "v1beta0".to_string(),
+        }
+    }
+
+    #[test]
+    fn embedded_resolve_params_merges_env_parties_and_args() {
+        let mut env = EnvMap::new();
+        env.insert("network".to_string(), serde_json::json!("testnet"));
+
+        let mut parties = HashMap::new();
+        parties.insert("receiver".to_string(), Party::address("addr_receiver"));
+
+        let mut args = ArgMap::new();
+        args.insert("quantity".to_string(), serde_json::json!(10_000_000));
+
+        let params = build_embedded_resolve_params(sample_tir(), env, &parties, args);
+
+        assert_eq!(params.env, None);
+        assert_eq!(params.tir.content, "abcd");
+        assert_eq!(params.args.get("network").unwrap(), &serde_json::json!("testnet"));
+        assert_eq!(
+            params.args.get("receiver").unwrap(),
+            &serde_json::json!("addr_receiver")
+        );
+        assert_eq!(
+            params.args.get("quantity").unwrap(),
+            &serde_json::json!(10_000_000)
+        );
+    }
+
+    #[test]
+    fn embedded_resolve_params_args_override_env() {
+        let mut env = EnvMap::new();
+        env.insert("quantity".to_string(), serde_json::json!(1));
+
+        let mut args = ArgMap::new();
+        args.insert("quantity".to_string(), serde_json::json!(999));
+
+        let params =
+            build_embedded_resolve_params(sample_tir(), env, &HashMap::new(), args);
+
+        assert_eq!(
+            params.args.get("quantity").unwrap(),
+            &serde_json::json!(999)
+        );
+    }
+
+    #[test]
+    fn embedded_resolve_params_uses_signer_party_address() {
+        let stub = StubSigner {
+            address: "addr_signer".to_string(),
+            witness: fake_witness("aa", "bb"),
+        };
+
+        let mut parties = HashMap::new();
+        parties.insert("sender".to_string(), Party::signer(stub));
+
+        let params = build_embedded_resolve_params(
+            sample_tir(),
+            EnvMap::new(),
+            &parties,
+            ArgMap::new(),
+        );
+
+        assert_eq!(
+            params.args.get("sender").unwrap(),
+            &serde_json::json!("addr_signer")
+        );
     }
 }
