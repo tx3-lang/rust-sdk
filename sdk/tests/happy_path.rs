@@ -120,6 +120,7 @@ async fn test_trp_happy_path_lifecycle() {
 
     let resolved = tx3
         .tx("transfer")
+        .expect("BUILD FAILED: transaction builder must be created")
         .arg("quantity", json!(10_000_000))
         .resolve()
         .await

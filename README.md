@@ -59,7 +59,7 @@ async fn main() -> Result<(), tx3_sdk::Error> {
 
     // 4. Build, resolve, sign, submit, and wait for confirmation
     let status = tx3
-        .tx("transfer")
+        .tx("transfer")?
         .arg("quantity", json!(10_000_000))
         .resolve()
         .await?
@@ -142,7 +142,7 @@ returned witness before `sign()`:
 
 ```rust
 let resolved = tx3
-    .tx("transfer")
+    .tx("transfer")?
     .arg("quantity", json!(10_000_000))
     .resolve()
     .await?;

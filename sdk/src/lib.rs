@@ -30,7 +30,7 @@
 //!     .with_party("middleman", Party::address("addr_test1..."));
 //!
 //! let status = tx3
-//!     .tx("transfer")
+//!     .tx("transfer")?
 //!     .arg("quantity", json!(10_000_000))
 //!     .resolve()
 //!     .await?

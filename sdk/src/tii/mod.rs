@@ -539,6 +539,16 @@ impl Invocation {
         self
     }
 
+    /// Consumes the invocation, yielding the embedded transaction shape: the
+    /// TIR envelope and the environment map (profile values and party addresses
+    /// already folded into a single argument map).
+    ///
+    /// This is the bridge the dynamic facade uses to drive the same resolve
+    /// path as a generated codegen client — see [`crate::TxBuilder`].
+    pub fn into_embedded(self) -> (TirEnvelope, ArgMap) {
+        (self.tir, self.args)
+    }
+
     /// Converts this invocation into a TRP resolve request.
     ///
     /// This method consumes the invocation and creates the parameters needed

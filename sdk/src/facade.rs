@@ -32,10 +32,6 @@ pub enum Error {
     #[error(transparent)]
     Trp(#[from] crate::trp::Error),
 
-    /// Required parameters were not provided.
-    #[error("missing required params: {0:?}")]
-    MissingParams(Vec<String>),
-
     /// A party was provided but not declared in the protocol.
     #[error("unknown party: {0}")]
     UnknownParty(String),
@@ -215,40 +211,52 @@ impl Tx3Client {
     }
 
     /// Starts building a transaction invocation.
-    pub fn tx(&self, name: impl Into<String>) -> TxBuilder {
-        TxBuilder {
-            source: TxSource::Protocol {
-                protocol: Arc::clone(&self.protocol),
-                tx_name: name.into(),
-                profile: self.profile.clone(),
-            },
+    ///
+    /// Loads the transaction from the protocol and adapts it — together with
+    /// the selected profile — into the same embedded shape a generated codegen
+    /// client carries, so the returned [`TxBuilder`] drives a single,
+    /// source-agnostic resolve path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transaction name is unknown, the selected
+    /// profile is unknown, or a bound party is not declared by the protocol.
+    pub fn tx(&self, name: impl Into<String>) -> Result<TxBuilder, Error> {
+        let name = name.into();
+        let invocation = self.protocol.invoke(&name, self.profile.as_deref())?;
+
+        let known_parties: HashSet<String> = self
+            .protocol
+            .parties()
+            .keys()
+            .map(|key| key.to_lowercase())
+            .collect();
+
+        for party in self.parties.keys() {
+            if !known_parties.contains(party) {
+                return Err(Error::UnknownParty(party.clone()));
+            }
+        }
+
+        let (tir, env) = invocation.into_embedded();
+
+        Ok(TxBuilder {
+            tir,
+            env,
             trp: self.trp.clone(),
             args: ArgMap::new(),
             parties: self.parties.clone(),
-        }
+        })
     }
 }
 
-/// Source of the transaction template driven by a [`TxBuilder`].
-enum TxSource {
-    /// Backed by a loaded [`Protocol`] — the dynamic path used by [`Tx3Client`].
-    Protocol {
-        protocol: Arc<Protocol>,
-        tx_name: String,
-        profile: Option<String>,
-    },
-    /// Backed by an embedded TIR envelope — the codegen path, which carries no
-    /// [`Protocol`] at runtime.
-    Embedded { tir: TirEnvelope, env: EnvMap },
-}
-
-/// Assembles the TRP resolve request for the embedded (codegen) path.
+/// Assembles the TRP resolve request shared by every [`TxBuilder`].
 ///
-/// Mirrors what [`Protocol::invoke`] + [`crate::tii::Invocation::into_resolve_request`]
-/// produce for the dynamic path: profile environment values and party addresses
-/// are folded into `args`, and `env` is left unset (TRP receives a single
-/// argument map). Caller-supplied `args` win over both.
-fn build_embedded_resolve_params(
+/// `env` (profile values, with any profile-declared party addresses already
+/// folded in), bound party addresses, and caller-supplied `args` are merged
+/// into a single argument map, in increasing order of precedence. The request
+/// `env` is left unset — TRP receives one argument map.
+fn build_resolve_params(
     tir: TirEnvelope,
     env: EnvMap,
     parties: &HashMap<String, Party>,
@@ -272,8 +280,15 @@ fn build_embedded_resolve_params(
 }
 
 /// Builder for transaction invocation.
+///
+/// A builder is an embedded TIR envelope plus the environment, arguments, and
+/// party bindings needed to resolve it. Generated codegen clients construct one
+/// via [`TxBuilder::from_embedded`]; the dynamic [`Tx3Client`] constructs one by
+/// adapting a loaded [`Protocol`] into the same shape. Both drive an identical
+/// resolve path.
 pub struct TxBuilder {
-    source: TxSource,
+    tir: TirEnvelope,
+    env: EnvMap,
     trp: trp::Client,
     args: ArgMap,
     parties: HashMap<String, Party>,
@@ -289,10 +304,8 @@ impl TxBuilder {
     /// bindings with [`TxBuilder::parties`].
     pub fn from_embedded(tir: TirEnvelope, trp: trp::Client) -> Self {
         TxBuilder {
-            source: TxSource::Embedded {
-                tir,
-                env: EnvMap::new(),
-            },
+            tir,
+            env: EnvMap::new(),
             trp,
             args: ArgMap::new(),
             parties: HashMap::new(),
@@ -300,14 +313,8 @@ impl TxBuilder {
     }
 
     /// Sets the environment values applied to this transaction.
-    ///
-    /// Only meaningful for builders created via [`TxBuilder::from_embedded`].
-    /// `Protocol`-backed builders derive the environment from the selected
-    /// profile and ignore this call.
     pub fn env(mut self, env: EnvMap) -> Self {
-        if let TxSource::Embedded { env: slot, .. } = &mut self.source {
-            *slot = env;
-        }
+        self.env = env;
         self
     }
 
@@ -339,55 +346,14 @@ impl TxBuilder {
     /// Resolves the transaction using the TRP client.
     pub async fn resolve(self) -> Result<ResolvedTx, Error> {
         let TxBuilder {
-            source,
+            tir,
+            env,
             trp,
             args,
             parties,
         } = self;
 
-        let resolve_params = match source {
-            TxSource::Protocol {
-                protocol,
-                tx_name,
-                profile,
-            } => {
-                let mut invocation = protocol.invoke(&tx_name, profile.as_deref())?;
-
-                let known_parties: HashSet<String> = protocol
-                    .parties()
-                    .keys()
-                    .map(|key| key.to_lowercase())
-                    .collect();
-
-                for (name, party) in &parties {
-                    if !known_parties.contains(name) {
-                        return Err(Error::UnknownParty(name.clone()));
-                    }
-
-                    invocation.set_arg(
-                        name,
-                        Value::String(party.address_value().to_string()),
-                    );
-                }
-
-                invocation.set_args(args);
-
-                let mut missing: Vec<String> = invocation
-                    .unspecified_params()
-                    .map(|(key, _)| key.clone())
-                    .collect();
-
-                if !missing.is_empty() {
-                    missing.sort();
-                    return Err(Error::MissingParams(missing));
-                }
-
-                invocation.into_resolve_request()?
-            }
-            TxSource::Embedded { tir, env } => {
-                build_embedded_resolve_params(tir, env, &parties, args)
-            }
-        };
+        let resolve_params = build_resolve_params(tir, env, &parties, args);
 
         let envelope = trp.resolve(resolve_params).await?;
 
@@ -1061,7 +1027,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_resolve_params_merges_env_parties_and_args() {
+    fn resolve_params_merges_env_parties_and_args() {
         let mut env = EnvMap::new();
         env.insert("network".to_string(), serde_json::json!("testnet"));
 
@@ -1071,7 +1037,7 @@ mod tests {
         let mut args = ArgMap::new();
         args.insert("quantity".to_string(), serde_json::json!(10_000_000));
 
-        let params = build_embedded_resolve_params(sample_tir(), env, &parties, args);
+        let params = build_resolve_params(sample_tir(), env, &parties, args);
 
         assert_eq!(params.env, None);
         assert_eq!(params.tir.content, "abcd");
@@ -1087,7 +1053,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_resolve_params_args_override_env() {
+    fn resolve_params_args_override_env() {
         let mut env = EnvMap::new();
         env.insert("quantity".to_string(), serde_json::json!(1));
 
@@ -1095,7 +1061,7 @@ mod tests {
         args.insert("quantity".to_string(), serde_json::json!(999));
 
         let params =
-            build_embedded_resolve_params(sample_tir(), env, &HashMap::new(), args);
+            build_resolve_params(sample_tir(), env, &HashMap::new(), args);
 
         assert_eq!(
             params.args.get("quantity").unwrap(),
@@ -1104,7 +1070,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_resolve_params_uses_signer_party_address() {
+    fn resolve_params_uses_signer_party_address() {
         let stub = StubSigner {
             address: "addr_signer".to_string(),
             witness: fake_witness("aa", "bb"),
@@ -1113,7 +1079,7 @@ mod tests {
         let mut parties = HashMap::new();
         parties.insert("sender".to_string(), Party::signer(stub));
 
-        let params = build_embedded_resolve_params(
+        let params = build_resolve_params(
             sample_tir(),
             EnvMap::new(),
             &parties,
