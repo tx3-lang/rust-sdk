@@ -81,13 +81,14 @@ pub struct Client {
 }
 
 impl Client {
-    /// Creates a Client pointed at a TRP endpoint.
-    pub fn new(endpoint: impl Into<String>) -> Self {
+    /// Creates a Client over the given TRP client options.
+    ///
+    /// `ClientOptions` carries the endpoint and any custom HTTP headers (e.g.
+    /// authorization for a hosted TRP), and stays open to future connection
+    /// options without a breaking change.
+    pub fn new(options: ClientOptions) -> Self {
         Self {
-            trp: TrpClient::new(ClientOptions {
-                endpoint: endpoint.into(),
-                headers: None,
-            }),
+            trp: TrpClient::new(options),
             parties: HashMap::new(),
             profile: None,
         }
