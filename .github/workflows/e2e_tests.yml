@@ -60,6 +60,5 @@ jobs:
         working-directory: ./sdk
         run: cargo test --test happy_path -- --nocapture
 
-      - name: Run tx3c codegen test
-        working-directory: ./sdk
-        run: cargo test --test codegen
+      - name: Render and verify codegen plugin
+        run: bash .github/scripts/codegen-check.sh
