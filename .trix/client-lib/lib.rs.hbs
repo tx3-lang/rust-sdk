@@ -141,7 +141,7 @@ impl Client {
     /// Builds the {{@key}} transaction. Drive the returned builder with
     /// `.resolve().await?` and the rest of the lifecycle chain.
     pub fn {{snakeCase @key}}(&self, args: {{pascalCase @key}}Params) -> TxBuilder {
-        TxBuilder::from_embedded({{snakeCase @key}}_tir(), self.trp.clone())
+        TxBuilder::new({{snakeCase @key}}_tir(), self.trp.clone())
             .env(self.env())
             .parties(self.merged_parties())
             .args(args.into())

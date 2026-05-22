@@ -213,9 +213,9 @@ impl Tx3Client {
     /// Starts building a transaction invocation.
     ///
     /// Loads the transaction from the protocol and adapts it — together with
-    /// the selected profile — into the same embedded shape a generated codegen
-    /// client carries, so the returned [`TxBuilder`] drives a single,
-    /// source-agnostic resolve path.
+    /// the selected profile — into a plain [`TxBuilder`], the same value a
+    /// generated codegen client constructs directly, so both drive an
+    /// identical resolve path.
     ///
     /// # Errors
     ///
@@ -238,7 +238,7 @@ impl Tx3Client {
             }
         }
 
-        let (tir, env) = invocation.into_embedded();
+        let (tir, env) = invocation.into_parts();
 
         Ok(TxBuilder {
             tir,
@@ -281,11 +281,10 @@ fn build_resolve_params(
 
 /// Builder for transaction invocation.
 ///
-/// A builder is an embedded TIR envelope plus the environment, arguments, and
-/// party bindings needed to resolve it. Generated codegen clients construct one
-/// via [`TxBuilder::from_embedded`]; the dynamic [`Tx3Client`] constructs one by
-/// adapting a loaded [`Protocol`] into the same shape. Both drive an identical
-/// resolve path.
+/// A builder is a TIR envelope plus the environment, arguments, and party
+/// bindings needed to resolve it. Generated codegen clients construct one via
+/// [`TxBuilder::new`]; the dynamic [`Tx3Client`] constructs one by adapting a
+/// loaded [`Protocol`]. Both drive an identical resolve path.
 pub struct TxBuilder {
     tir: TirEnvelope,
     env: EnvMap,
@@ -295,14 +294,14 @@ pub struct TxBuilder {
 }
 
 impl TxBuilder {
-    /// Creates a builder from an embedded TIR envelope, without a [`Protocol`].
+    /// Creates a builder from a TIR envelope.
     ///
-    /// This is the entry point used by generated codegen clients: they embed the
-    /// per-transaction TIR and profile data at codegen time and drive the full
-    /// `resolve → sign → submit → wait` lifecycle without loading a `.tii` file.
-    /// Supply environment values with [`TxBuilder::env`] and signer/address
-    /// bindings with [`TxBuilder::parties`].
-    pub fn from_embedded(tir: TirEnvelope, trp: trp::Client) -> Self {
+    /// This is the entry point used by generated codegen clients: they bake the
+    /// per-transaction TIR and profile data into the generated source at
+    /// codegen time and drive the full `resolve → sign → submit → wait`
+    /// lifecycle without loading a `.tii` file. Supply environment values with
+    /// [`TxBuilder::env`] and signer/address bindings with [`TxBuilder::parties`].
+    pub fn new(tir: TirEnvelope, trp: trp::Client) -> Self {
         TxBuilder {
             tir,
             env: EnvMap::new(),
