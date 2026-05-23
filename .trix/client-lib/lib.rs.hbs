@@ -3,9 +3,10 @@
 
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
-use tx3_sdk::core::{ArgMap, EnvMap, TirEncoding, TirEnvelope};
-use tx3_sdk::trp::{Client as TrpClient, ClientOptions};
+use serde::Serialize;
+use tx3_sdk::codegen::{Profile, ProtocolClient};
+use tx3_sdk::core::{ArgMap, TirEncoding, TirEnvelope};
+use tx3_sdk::trp::ClientOptions;
 use tx3_sdk::{Party, TxBuilder};
 
 /// Protocol name, embedded from the TII at codegen time.
@@ -20,22 +21,11 @@ pub const TARGET_TII_VERSION: &str = "{{tii.tii.version}}";
 pub const ENVIRONMENT_SCHEMA: &str = r#"{{{json tii.environment}}}"#;
 {{/if}}
 
-/// A named TII profile: environment values and party addresses.
-#[derive(Debug, Clone, Deserialize)]
-pub struct Profile {
-    /// Environment values applied to every transaction under this profile.
-    #[serde(default)]
-    pub environment: EnvMap,
-    /// Party addresses applied to every transaction under this profile.
-    #[serde(default)]
-    pub parties: HashMap<String, String>,
-}
-
 const PROFILES_JSON: &str = r#"{{{json tii.profiles}}}"#;
 
 /// Returns the profiles embedded from the TII, keyed by name.
 pub fn profiles() -> HashMap<String, Profile> {
-    serde_json::from_str(PROFILES_JSON).expect("codegen: invalid embedded profiles")
+    Profile::load_all(PROFILES_JSON)
 }
 
 {{#each tii.transactions}}
@@ -74,28 +64,15 @@ impl From<{{pascalCase @key}}Params> for ArgMap {
 ///
 /// Each transaction method returns a [`TxBuilder`]; drive it through
 /// `resolve → sign → submit → wait` using the runtime SDK's lifecycle chain.
-pub struct Client {
-    trp: TrpClient,
-    parties: HashMap<String, Party>,
-    profile: Option<Profile>,
-}
+pub struct Client(ProtocolClient);
 
 impl Client {
-    /// Creates a Client over the given TRP client options.
-    ///
-    /// `ClientOptions` carries the endpoint and any custom HTTP headers (e.g.
-    /// authorization for a hosted TRP), and stays open to future connection
-    /// options without a breaking change.
+    /// Creates a Client over the given TRP options.
     pub fn new(options: ClientOptions) -> Self {
-        Self {
-            trp: TrpClient::new(options),
-            parties: HashMap::new(),
-            profile: None,
-        }
+        Self(ProtocolClient::new(options))
     }
 
-    /// Selects an embedded profile by name, applying its environment values and
-    /// party addresses to every subsequent transaction.
+    /// Selects an embedded profile by name.
     ///
     /// # Panics
     ///
@@ -104,7 +81,7 @@ impl Client {
         let profile = profiles()
             .remove(name)
             .unwrap_or_else(|| panic!("unknown profile `{name}`"));
-        self.profile = Some(profile);
+        self.0 = self.0.with_profile(profile);
         self
     }
 
@@ -112,40 +89,15 @@ impl Client {
     ///
     /// Overrides any address declared for that party by the selected profile.
     pub fn with_party(mut self, name: impl Into<String>, party: Party) -> Self {
-        self.parties.insert(name.into().to_lowercase(), party);
+        self.0 = self.0.with_party(name, party);
         self
-    }
-
-    /// Environment values from the selected profile, if any.
-    fn env(&self) -> EnvMap {
-        self.profile
-            .as_ref()
-            .map(|profile| profile.environment.clone())
-            .unwrap_or_default()
-    }
-
-    /// Profile-declared party addresses overlaid with parties bound at runtime.
-    fn merged_parties(&self) -> HashMap<String, Party> {
-        let mut merged = HashMap::new();
-        if let Some(profile) = &self.profile {
-            for (name, address) in &profile.parties {
-                merged.insert(name.to_lowercase(), Party::address(address.clone()));
-            }
-        }
-        for (name, party) in &self.parties {
-            merged.insert(name.clone(), party.clone());
-        }
-        merged
     }
 {{#each tii.transactions}}
 
     /// Builds the {{@key}} transaction. Drive the returned builder with
     /// `.resolve().await?` and the rest of the lifecycle chain.
     pub fn {{snakeCase @key}}(&self, args: {{pascalCase @key}}Params) -> TxBuilder {
-        TxBuilder::new({{snakeCase @key}}_tir(), self.trp.clone())
-            .env(self.env())
-            .parties(self.merged_parties())
-            .args(args.into())
+        self.0.tx({{snakeCase @key}}_tir()).args(args.into())
     }
 {{/each}}
 }

@@ -47,6 +47,7 @@
 //!
 //! - [TX3 Documentation](https://docs.txpipe.io/tx3)
 
+pub mod codegen;
 pub mod core;
 pub mod facade;
 pub mod tii;
