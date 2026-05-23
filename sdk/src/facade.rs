@@ -177,8 +177,8 @@ impl Party {
 /// addresses keyed by name.
 ///
 /// Produced either by deconstructing a loaded [`Protocol`] (via
-/// [`Tx3Client::from_protocol`]) or by parsing the JSON a generated codegen
-/// client embeds (via [`Profile::load_all`]).
+/// [`Tx3Client::new`]) or by parsing the JSON a generated codegen client
+/// embeds (via [`Profile::load_all`]).
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Profile {
     /// Environment values applied to every transaction under this profile.
@@ -207,8 +207,8 @@ impl Profile {
 /// named profiles, the set of declared party names — plus the runtime state
 /// (TRP client, bound parties, selected profile). One client type backs both
 /// flows: the *dynamic* flow constructs it from a loaded [`Protocol`] via
-/// [`Tx3Client::from_protocol`]; the *codegen* flow constructs it from the
-/// parts a generated client embeds via [`Tx3Client::new`].
+/// [`Tx3Client::new`]; the *codegen* flow constructs it from the parts a
+/// generated client embeds via [`Tx3Client::from_parts`].
 #[derive(Clone)]
 pub struct Tx3Client {
     transactions: HashMap<String, TirEnvelope>,
@@ -225,7 +225,7 @@ impl Tx3Client {
     /// The codegen entry point: a generated client embeds the per-transaction
     /// TIR envelopes, named profiles, and the set of declared party names at
     /// codegen time and passes them here.
-    pub fn new(
+    pub fn from_parts(
         transactions: HashMap<String, TirEnvelope>,
         profiles: HashMap<String, Profile>,
         known_parties: HashSet<String>,
@@ -248,7 +248,7 @@ impl Tx3Client {
     /// Constructs a client from a loaded [`Protocol`], deconstructing it into
     /// the parts the client stores locally. The runtime no longer holds onto
     /// the `Protocol` after this call.
-    pub fn from_protocol(protocol: Protocol, trp: trp::Client) -> Self {
+    pub fn new(protocol: Protocol, trp: trp::Client) -> Self {
         let transactions = protocol
             .txs()
             .iter()
@@ -276,31 +276,28 @@ impl Tx3Client {
 
         let known_parties = protocol.parties().keys().cloned().collect();
 
-        Self::new(transactions, profiles, known_parties, trp)
+        Self::from_parts(transactions, profiles, known_parties, trp)
     }
 
     /// Loads a [`Protocol`] from a file path and constructs a client from it.
-    pub fn from_protocol_file(
+    pub fn from_file(
         path: impl AsRef<std::path::Path>,
         trp: trp::Client,
     ) -> Result<Self, Error> {
         let protocol = Protocol::from_file(path)?;
-        Ok(Self::from_protocol(protocol, trp))
+        Ok(Self::new(protocol, trp))
     }
 
     /// Parses a TII JSON string and constructs a client from it.
-    pub fn from_protocol_string(code: String, trp: trp::Client) -> Result<Self, Error> {
+    pub fn from_string(code: String, trp: trp::Client) -> Result<Self, Error> {
         let protocol = Protocol::from_string(code)?;
-        Ok(Self::from_protocol(protocol, trp))
+        Ok(Self::new(protocol, trp))
     }
 
     /// Parses a TII JSON value and constructs a client from it.
-    pub fn from_protocol_json(
-        json: serde_json::Value,
-        trp: trp::Client,
-    ) -> Result<Self, Error> {
+    pub fn from_json(json: serde_json::Value, trp: trp::Client) -> Result<Self, Error> {
         let protocol = Protocol::from_json(json)?;
-        Ok(Self::from_protocol(protocol, trp))
+        Ok(Self::new(protocol, trp))
     }
 
     /// Selects a profile by name. Its environment values and party addresses

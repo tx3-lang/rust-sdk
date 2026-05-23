@@ -52,7 +52,7 @@ async fn main() -> Result<(), tx3_sdk::Error> {
         "word1 word2 ... word24",
     )?;
 
-    let tx3 = Tx3Client::from_protocol(protocol, trp)
+    let tx3 = Tx3Client::new(protocol, trp)
         .with_profile("preprod")?
         .with_party("sender", Party::signer(signer))?
         .with_party("receiver", Party::address("addr_test1..."))?;

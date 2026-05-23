@@ -78,7 +78,7 @@ impl Client {
         known_parties.insert("{{@key}}".to_string());
 {{/each}}
 
-        Self(Tx3Client::new(
+        Self(Tx3Client::from_parts(
             transactions,
             profiles(),
             known_parties,

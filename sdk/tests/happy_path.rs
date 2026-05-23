@@ -112,7 +112,7 @@ async fn test_trp_happy_path_lifecycle() {
     let signer =
         CardanoSigner::from_mnemonic(&party_a, &mnemonic_a).expect("Invalid mnemonic or address");
 
-    let tx3 = Tx3Client::from_protocol(protocol, trp.clone())
+    let tx3 = Tx3Client::new(protocol, trp.clone())
         .with_profile("preprod")
         .expect("WITH_PROFILE FAILED: profile must be declared")
         .with_party("sender", Party::signer(signer))
