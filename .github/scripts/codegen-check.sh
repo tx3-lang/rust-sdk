@@ -35,18 +35,14 @@ done
 for sym in \
   'pub const TARGET_TII_VERSION' \
   'pub static TRANSFER_TIR: LazyLock<TirEnvelope>' \
-  'pub static PREPROD_PROFILE: LazyLock<Profile>' \
+  'pub enum Profile' \
+  'Preprod,' \
   'pub struct TransferParams' \
   'pub struct Client' \
-  'pub struct ClientBuilder' \
-  'pub fn new(options: ClientOptions)' \
-  'pub fn builder(options: ClientOptions) -> ClientBuilder' \
-  'pub fn with_profile' \
+  'pub fn new(options: ClientOptions, profile: Profile)' \
   'pub fn with_sender(' \
   'pub fn with_receiver(' \
   'pub fn with_middleman(' \
-  'pub fn with_env_value' \
-  'pub fn build(self) -> Client' \
   'pub fn transfer(&self, args: TransferParams) -> TxBuilder'; do
   grep -qF "$sym" "$gen/lib.rs" || { echo "generated lib.rs missing: $sym"; exit 1; }
 done
@@ -56,6 +52,19 @@ if grep -qE 'pub fn with_party' "$gen/lib.rs"; then
   echo "generated lib.rs exposes generic with_party — should be typed per party"
   exit 1
 fi
+
+# The wrapper builder layer is gone — no ClientBuilder, no Client::builder().
+for forbidden in \
+  'pub struct ClientBuilder' \
+  'pub fn builder(' \
+  'pub fn with_profile' \
+  'pub fn with_env_value' \
+  'pub fn with_header'; do
+  if grep -qF "$forbidden" "$gen/lib.rs"; then
+    echo "generated lib.rs exposes removed surface: $forbidden"
+    exit 1
+  fi
+done
 
 # Compile against the SDK in this checkout — the template may require a
 # `tx3-sdk` version not yet published to crates.io.
