@@ -45,6 +45,10 @@ pub enum Error {
     #[error("unknown party: {0}")]
     UnknownParty(String),
 
+    /// The builder was finalized without a TRP endpoint.
+    #[error("TRP endpoint not configured")]
+    MissingTrpEndpoint,
+
     /// Signer failed to produce a witness.
     #[error("signer error: {0}")]
     Signer(#[source] Box<dyn std::error::Error + Send + Sync>),
@@ -176,9 +180,7 @@ impl Party {
 /// A named profile baked into a client: environment values and party
 /// addresses keyed by name.
 ///
-/// Produced either by deconstructing a loaded [`Protocol`] (via
-/// [`Tx3Client::new`]) or by parsing the JSON a generated codegen client
-/// embeds (via [`Profile::load_all`]).
+/// Produced by [`Tx3ClientBuilder::build`] from a loaded [`Protocol`].
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Profile {
     /// Environment values applied to every transaction under this profile.
@@ -189,47 +191,37 @@ pub struct Profile {
     pub parties: HashMap<String, String>,
 }
 
-impl Profile {
-    /// Parses a JSON map of profiles, the shape the codegen template embeds.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the JSON does not parse — codegen produces a valid map by
-    /// construction, so a panic indicates a bug in the template.
-    pub fn load_all(json: &str) -> HashMap<String, Profile> {
-        serde_json::from_str(json).expect("codegen: invalid embedded profiles")
-    }
-}
-
 /// High-level client over a TX3 protocol.
 ///
 /// Holds the deconstructed protocol parts — per-transaction TIR envelopes,
 /// named profiles, the set of declared party names — plus the runtime state
-/// (TRP client, bound parties, selected profile). One client type backs both
-/// flows: the *dynamic* flow constructs it from a loaded [`Protocol`] via
-/// [`Tx3Client::new`]; the *codegen* flow constructs it from the parts a
-/// generated client embeds via [`Tx3Client::from_parts`].
+/// (TRP client, bound parties, selected profile and env overrides).
+///
+/// Construct one through [`Tx3ClientBuilder`], obtained via
+/// [`Protocol::client`]: profile selection and party/env binding happen on
+/// the builder, and `build()` performs all fallible validation.
 #[derive(Clone)]
 pub struct Tx3Client {
     transactions: HashMap<String, TirEnvelope>,
-    profiles: HashMap<String, Profile>,
     known_parties: HashSet<String>,
     trp: trp::Client,
     bound_parties: HashMap<String, Party>,
     selected_profile: Option<Profile>,
+    env_overrides: EnvMap,
 }
 
 impl Tx3Client {
     /// Constructs a client from already-deconstructed protocol parts.
     ///
-    /// The codegen entry point: a generated client embeds the per-transaction
-    /// TIR envelopes, named profiles, and the set of declared party names at
-    /// codegen time and passes them here.
-    pub fn from_parts(
+    /// Crate-internal entry used by [`Tx3ClientBuilder::build`]. External
+    /// callers go through the builder.
+    pub(crate) fn from_parts(
         transactions: HashMap<String, TirEnvelope>,
-        profiles: HashMap<String, Profile>,
         known_parties: HashSet<String>,
         trp: trp::Client,
+        bound_parties: HashMap<String, Party>,
+        selected_profile: Option<Profile>,
+        env_overrides: EnvMap,
     ) -> Self {
         let known_parties = known_parties
             .into_iter()
@@ -237,87 +229,17 @@ impl Tx3Client {
             .collect();
         Self {
             transactions,
-            profiles,
             known_parties,
             trp,
-            bound_parties: HashMap::new(),
-            selected_profile: None,
+            bound_parties,
+            selected_profile,
+            env_overrides,
         }
     }
 
-    /// Constructs a client from a loaded [`Protocol`], deconstructing it into
-    /// the parts the client stores locally. The runtime no longer holds onto
-    /// the `Protocol` after this call.
-    pub fn new(protocol: Protocol, trp: trp::Client) -> Self {
-        let transactions = protocol
-            .txs()
-            .iter()
-            .map(|(name, tx)| (name.clone(), tx.tir.clone()))
-            .collect();
-
-        let profiles = protocol
-            .profiles()
-            .iter()
-            .map(|(name, profile)| {
-                let environment = profile
-                    .environment
-                    .as_object()
-                    .cloned()
-                    .unwrap_or_default();
-                (
-                    name.clone(),
-                    Profile {
-                        environment,
-                        parties: profile.parties.clone(),
-                    },
-                )
-            })
-            .collect();
-
-        let known_parties = protocol.parties().keys().cloned().collect();
-
-        Self::from_parts(transactions, profiles, known_parties, trp)
-    }
-
-    /// Loads a [`Protocol`] from a file path and constructs a client from it.
-    pub fn from_file(
-        path: impl AsRef<std::path::Path>,
-        trp: trp::Client,
-    ) -> Result<Self, Error> {
-        let protocol = Protocol::from_file(path)?;
-        Ok(Self::new(protocol, trp))
-    }
-
-    /// Parses a TII JSON string and constructs a client from it.
-    pub fn from_string(code: String, trp: trp::Client) -> Result<Self, Error> {
-        let protocol = Protocol::from_string(code)?;
-        Ok(Self::new(protocol, trp))
-    }
-
-    /// Parses a TII JSON value and constructs a client from it.
-    pub fn from_json(json: serde_json::Value, trp: trp::Client) -> Result<Self, Error> {
-        let protocol = Protocol::from_json(json)?;
-        Ok(Self::new(protocol, trp))
-    }
-
-    /// Selects a profile by name. Its environment values and party addresses
-    /// apply to every subsequent transaction.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::UnknownProfile`] if `name` is not a profile declared
-    /// by the protocol.
-    pub fn with_profile(mut self, name: &str) -> Result<Self, Error> {
-        let profile = self
-            .profiles
-            .get(name)
-            .cloned()
-            .ok_or_else(|| Error::UnknownProfile(name.to_string()))?;
-        self.selected_profile = Some(profile);
-        Ok(self)
-    }
-
-    /// Binds a party (signer or read-only address) by name.
+    /// Binds a party (signer or read-only address) by name after the client
+    /// has been built. Useful for late binding when, e.g., a user logs in
+    /// after the client is already in scope.
     ///
     /// Overrides any address the selected profile declared for the same name.
     ///
@@ -370,10 +292,15 @@ impl Tx3Client {
     }
 
     fn env(&self) -> EnvMap {
-        self.selected_profile
+        let mut env = self
+            .selected_profile
             .as_ref()
             .map(|profile| profile.environment.clone())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        for (key, value) in &self.env_overrides {
+            env.insert(key.clone(), value.clone());
+        }
+        env
     }
 
     fn merged_parties(&self) -> HashMap<String, Party> {
@@ -387,6 +314,186 @@ impl Tx3Client {
             merged.insert(name.clone(), party.clone());
         }
         merged
+    }
+}
+
+/// Builder for [`Tx3Client`].
+///
+/// Obtained via [`Protocol::client`]. All fallible validation — verifying
+/// that the selected profile exists, that every bound party is declared by
+/// the protocol — happens in [`Tx3ClientBuilder::build`]. Setters never
+/// return `Result`, so chains stay fluent.
+///
+/// # Example
+///
+/// ```ignore
+/// use tx3_sdk::tii::Protocol;
+/// use tx3_sdk::{Party};
+///
+/// let client = Protocol::from_file("protocol.tii")?
+///     .client()
+///     .trp_endpoint("https://trp.example")
+///     .with_profile("preprod")
+///     .with_party("sender", Party::address("addr_test1..."))
+///     .build()?;
+/// ```
+pub struct Tx3ClientBuilder {
+    protocol: Protocol,
+    trp_options: Option<trp::ClientOptions>,
+    profile: Option<String>,
+    parties: HashMap<String, Party>,
+    env_overrides: EnvMap,
+}
+
+impl Tx3ClientBuilder {
+    pub(crate) fn from_protocol(protocol: Protocol) -> Self {
+        Self {
+            protocol,
+            trp_options: None,
+            profile: None,
+            parties: HashMap::new(),
+            env_overrides: EnvMap::new(),
+        }
+    }
+
+    /// Sets the full TRP client options.
+    pub fn trp(mut self, opts: trp::ClientOptions) -> Self {
+        self.trp_options = Some(opts);
+        self
+    }
+
+    /// Sets the TRP endpoint URL (no headers). Overwrites any previously
+    /// supplied options.
+    pub fn trp_endpoint(mut self, url: impl Into<String>) -> Self {
+        self.trp_options = Some(trp::ClientOptions {
+            endpoint: url.into(),
+            headers: None,
+        });
+        self
+    }
+
+    /// Adds a header to the TRP client. Initializes the TRP options to an
+    /// empty endpoint if not yet set — callers must still supply an endpoint
+    /// via [`Tx3ClientBuilder::trp`] or [`Tx3ClientBuilder::trp_endpoint`].
+    pub fn with_header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        let opts = self.trp_options.get_or_insert_with(|| trp::ClientOptions {
+            endpoint: String::new(),
+            headers: None,
+        });
+        opts.headers
+            .get_or_insert_with(HashMap::new)
+            .insert(key.into(), value.into());
+        self
+    }
+
+    /// Selects a profile by name. Validated in `build()`.
+    pub fn with_profile(mut self, name: impl Into<String>) -> Self {
+        self.profile = Some(name.into());
+        self
+    }
+
+    /// Binds a party (signer or read-only address) by name. Validated in
+    /// `build()`.
+    pub fn with_party(mut self, name: impl Into<String>, party: Party) -> Self {
+        self.parties.insert(name.into().to_lowercase(), party);
+        self
+    }
+
+    /// Binds multiple parties at once.
+    pub fn with_parties<I, K>(mut self, parties: I) -> Self
+    where
+        I: IntoIterator<Item = (K, Party)>,
+        K: Into<String>,
+    {
+        for (name, party) in parties {
+            self = self.with_party(name, party);
+        }
+        self
+    }
+
+    /// Sets a single environment value. Merged on top of the selected
+    /// profile's environment at resolve time (override wins).
+    pub fn with_env_value(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<Value>,
+    ) -> Self {
+        self.env_overrides.insert(key.into(), value.into());
+        self
+    }
+
+    /// Validates the builder state and materializes the [`Tx3Client`].
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::Trp`] if no TRP endpoint was supplied.
+    /// - [`Error::UnknownProfile`] if the selected profile is not declared
+    ///   by the protocol.
+    /// - [`Error::UnknownParty`] if any bound party is not declared by the
+    ///   protocol.
+    pub fn build(self) -> Result<Tx3Client, Error> {
+        let trp_options = self.trp_options.ok_or(Error::MissingTrpEndpoint)?;
+        if trp_options.endpoint.is_empty() {
+            return Err(Error::MissingTrpEndpoint);
+        }
+
+        let transactions = self
+            .protocol
+            .txs()
+            .iter()
+            .map(|(name, tx)| (name.clone(), tx.tir.clone()))
+            .collect();
+
+        let profiles: HashMap<String, Profile> = self
+            .protocol
+            .profiles()
+            .iter()
+            .map(|(name, profile)| {
+                let environment =
+                    profile.environment.as_object().cloned().unwrap_or_default();
+                (
+                    name.clone(),
+                    Profile {
+                        environment,
+                        parties: profile.parties.clone(),
+                    },
+                )
+            })
+            .collect();
+
+        let known_parties: HashSet<String> = self
+            .protocol
+            .parties()
+            .keys()
+            .map(|n| n.to_lowercase())
+            .collect();
+
+        let selected_profile = match self.profile {
+            Some(name) => Some(
+                profiles
+                    .get(&name)
+                    .cloned()
+                    .ok_or(Error::UnknownProfile(name))?,
+            ),
+            None => None,
+        };
+
+        for name in self.parties.keys() {
+            if !known_parties.contains(name) {
+                return Err(Error::UnknownParty(name.clone()));
+            }
+        }
+
+        let trp = trp::Client::new(trp_options);
+
+        Ok(Tx3Client::from_parts(
+            transactions,
+            known_parties,
+            trp,
+            self.parties,
+            selected_profile,
+            self.env_overrides,
+        ))
     }
 }
 

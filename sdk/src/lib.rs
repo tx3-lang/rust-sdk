@@ -9,25 +9,21 @@
 //!
 //! ```ignore
 //! use serde_json::json;
-//! use tx3_sdk::trp::{Client, ClientOptions};
-//! use tx3_sdk::{CardanoSigner, Party, PollConfig, Tx3Client};
+//! use tx3_sdk::{CardanoSigner, Party, PollConfig};
 //!
 //! let signer = CardanoSigner::from_mnemonic(
 //!     "addr_test1...",
 //!     "word1 word2 ... word24",
 //! )?;
 //!
-//! let protocol = tx3_sdk::tii::Protocol::from_file("./examples/transfer.tii")?;
-//! let trp = Client::new(ClientOptions {
-//!     endpoint: "https://trp.example.com".to_string(),
-//!     headers: None,
-//! });
-//!
-//! let tx3 = Tx3Client::new(protocol, trp)
-//!     .with_profile("preprod")?
-//!     .with_party("sender", Party::signer(signer))?
-//!     .with_party("receiver", Party::address("addr_test1..."))?
-//!     .with_party("middleman", Party::address("addr_test1..."))?;
+//! let tx3 = tx3_sdk::tii::Protocol::from_file("./examples/transfer.tii")?
+//!     .client()
+//!     .trp_endpoint("https://trp.example.com")
+//!     .with_profile("preprod")
+//!     .with_party("sender", Party::signer(signer))
+//!     .with_party("receiver", Party::address("addr_test1..."))
+//!     .with_party("middleman", Party::address("addr_test1..."))
+//!     .build()?;
 //!
 //! let status = tx3
 //!     .tx("transfer")?
@@ -55,5 +51,5 @@ pub mod trp;
 pub use facade::signer::{CardanoSigner, Ed25519Signer};
 pub use facade::{
     Error, Party, PollConfig, Profile, ResolvedTx, SignRequest, SignedTx, Signer, SubmittedTx,
-    Tx3Client, TxBuilder, WitnessInfo,
+    Tx3Client, Tx3ClientBuilder, TxBuilder, WitnessInfo,
 };
