@@ -332,6 +332,11 @@ impl Protocol {
     pub fn parties(&self) -> &HashMap<String, spec::Party> {
         &self.spec.parties
     }
+
+    /// Returns all profiles defined in the protocol.
+    pub fn profiles(&self) -> &HashMap<String, spec::Profile> {
+        &self.spec.profiles
+    }
 }
 
 /// Type of a transaction parameter.
@@ -537,16 +542,6 @@ impl Invocation {
     pub fn with_args(mut self, args: ArgMap) -> Self {
         self.args.extend(args);
         self
-    }
-
-    /// Consumes the invocation, yielding its resolve inputs: the TIR envelope
-    /// and the environment map (profile values and party addresses already
-    /// folded into a single argument map).
-    ///
-    /// This is the bridge the dynamic facade uses to drive the same resolve
-    /// path as a generated codegen client — see [`crate::TxBuilder`].
-    pub fn into_parts(self) -> (TirEnvelope, ArgMap) {
-        (self.tir, self.args)
     }
 
     /// Converts this invocation into a TRP resolve request.

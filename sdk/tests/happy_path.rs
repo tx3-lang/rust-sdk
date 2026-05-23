@@ -112,7 +112,7 @@ async fn test_trp_happy_path_lifecycle() {
     let signer =
         CardanoSigner::from_mnemonic(&party_a, &mnemonic_a).expect("Invalid mnemonic or address");
 
-    let tx3 = Tx3Client::new(protocol, trp.clone())
+    let tx3 = Tx3Client::from_protocol(protocol, trp.clone())
         .with_profile("preprod")
         .with_party("sender", Party::signer(signer))
         .with_party("middleman", Party::address(&party_b))
@@ -120,7 +120,6 @@ async fn test_trp_happy_path_lifecycle() {
 
     let resolved = tx3
         .tx("transfer")
-        .expect("BUILD FAILED: transaction builder must be created")
         .arg("quantity", json!(10_000_000))
         .resolve()
         .await

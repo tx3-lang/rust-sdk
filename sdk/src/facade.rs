@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde::Deserialize;
 use serde_json::Value;
 use thiserror::Error;
 
@@ -31,10 +32,6 @@ pub enum Error {
     /// Error originating from TRP operations.
     #[error(transparent)]
     Trp(#[from] crate::trp::Error),
-
-    /// A party was provided but not declared in the protocol.
-    #[error("unknown party: {0}")]
-    UnknownParty(String),
 
     /// Signer failed to produce a witness.
     #[error("signer error: {0}")]
@@ -164,89 +161,219 @@ impl Party {
     }
 }
 
-/// High-level client that ties a protocol to a TRP client.
+/// A named profile baked into a client: environment values and party
+/// addresses keyed by name.
+///
+/// Produced either by deconstructing a loaded [`Protocol`] (via
+/// [`Tx3Client::from_protocol`]) or by parsing the JSON a generated codegen
+/// client embeds (via [`Profile::load_all`]).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Profile {
+    /// Environment values applied to every transaction under this profile.
+    #[serde(default)]
+    pub environment: EnvMap,
+    /// Party addresses applied to every transaction under this profile.
+    #[serde(default)]
+    pub parties: HashMap<String, String>,
+}
+
+impl Profile {
+    /// Parses a JSON map of profiles, the shape the codegen template embeds.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the JSON does not parse — codegen produces a valid map by
+    /// construction, so a panic indicates a bug in the template.
+    pub fn load_all(json: &str) -> HashMap<String, Profile> {
+        serde_json::from_str(json).expect("codegen: invalid embedded profiles")
+    }
+}
+
+/// High-level client over a TX3 protocol.
+///
+/// Holds the deconstructed protocol parts — per-transaction TIR envelopes,
+/// named profiles, the set of declared party names — plus the runtime state
+/// (TRP client, bound parties, selected profile). One client type backs both
+/// flows: the *dynamic* flow constructs it from a loaded [`Protocol`] via
+/// [`Tx3Client::from_protocol`]; the *codegen* flow constructs it from the
+/// parts a generated client embeds via [`Tx3Client::new`].
 #[derive(Clone)]
 pub struct Tx3Client {
-    protocol: Arc<Protocol>,
+    transactions: HashMap<String, TirEnvelope>,
+    profiles: HashMap<String, Profile>,
+    known_parties: HashSet<String>,
     trp: trp::Client,
-    parties: HashMap<String, Party>,
-    profile: Option<String>,
+    bound_parties: HashMap<String, Party>,
+    selected_profile: Option<Profile>,
 }
 
 impl Tx3Client {
-    /// Creates a new facade client.
-    pub fn new(protocol: Protocol, trp: trp::Client) -> Self {
+    /// Constructs a client from already-deconstructed protocol parts.
+    ///
+    /// The codegen entry point: a generated client embeds the per-transaction
+    /// TIR envelopes, named profiles, and the set of declared party names at
+    /// codegen time and passes them here.
+    pub fn new(
+        transactions: HashMap<String, TirEnvelope>,
+        profiles: HashMap<String, Profile>,
+        known_parties: HashSet<String>,
+        trp: trp::Client,
+    ) -> Self {
+        let known_parties = known_parties
+            .into_iter()
+            .map(|name| name.to_lowercase())
+            .collect();
         Self {
-            protocol: Arc::new(protocol),
+            transactions,
+            profiles,
+            known_parties,
             trp,
-            parties: HashMap::new(),
-            profile: None,
+            bound_parties: HashMap::new(),
+            selected_profile: None,
         }
     }
 
-    /// Sets the profile for all invocations created by this client.
+    /// Constructs a client from a loaded [`Protocol`], deconstructing it into
+    /// the parts the client stores locally. The runtime no longer holds onto
+    /// the `Protocol` after this call.
+    pub fn from_protocol(protocol: Protocol, trp: trp::Client) -> Self {
+        let transactions = protocol
+            .txs()
+            .iter()
+            .map(|(name, tx)| (name.clone(), tx.tir.clone()))
+            .collect();
+
+        let profiles = protocol
+            .profiles()
+            .iter()
+            .map(|(name, profile)| {
+                let environment = profile
+                    .environment
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default();
+                (
+                    name.clone(),
+                    Profile {
+                        environment,
+                        parties: profile.parties.clone(),
+                    },
+                )
+            })
+            .collect();
+
+        let known_parties = protocol.parties().keys().cloned().collect();
+
+        Self::new(transactions, profiles, known_parties, trp)
+    }
+
+    /// Loads a [`Protocol`] from a file path and constructs a client from it.
+    pub fn from_protocol_file(
+        path: impl AsRef<std::path::Path>,
+        trp: trp::Client,
+    ) -> Result<Self, Error> {
+        let protocol = Protocol::from_file(path)?;
+        Ok(Self::from_protocol(protocol, trp))
+    }
+
+    /// Parses a TII JSON string and constructs a client from it.
+    pub fn from_protocol_string(code: String, trp: trp::Client) -> Result<Self, Error> {
+        let protocol = Protocol::from_string(code)?;
+        Ok(Self::from_protocol(protocol, trp))
+    }
+
+    /// Parses a TII JSON value and constructs a client from it.
+    pub fn from_protocol_json(
+        json: serde_json::Value,
+        trp: trp::Client,
+    ) -> Result<Self, Error> {
+        let protocol = Protocol::from_json(json)?;
+        Ok(Self::from_protocol(protocol, trp))
+    }
+
+    /// Selects a profile by name. Its environment values and party addresses
+    /// apply to every subsequent transaction.
     ///
-    /// This profile is applied to every invocation created by the client.
-    pub fn with_profile(mut self, profile: impl Into<String>) -> Self {
-        self.profile = Some(profile.into());
+    /// # Panics
+    ///
+    /// Panics if `name` is not a profile declared by the protocol.
+    pub fn with_profile(mut self, name: &str) -> Self {
+        let profile = self
+            .profiles
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| panic!("unknown profile `{name}`"));
+        self.selected_profile = Some(profile);
         self
     }
 
-    /// Attaches a party definition to this client.
+    /// Binds a party (signer or read-only address) by name.
+    ///
+    /// Overrides any address the selected profile declared for the same name.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `name` is not a party declared by the protocol.
     pub fn with_party(mut self, name: impl Into<String>, party: Party) -> Self {
-        self.parties.insert(name.into().to_lowercase(), party);
+        let name = name.into().to_lowercase();
+        if !self.known_parties.contains(&name) {
+            panic!("unknown party `{name}`");
+        }
+        self.bound_parties.insert(name, party);
         self
     }
 
-    /// Attaches multiple party definitions to this client.
+    /// Binds multiple parties at once. See [`Tx3Client::with_party`].
     pub fn with_parties<I, K>(mut self, parties: I) -> Self
     where
         I: IntoIterator<Item = (K, Party)>,
         K: Into<String>,
     {
         for (name, party) in parties {
-            self.parties.insert(name.into().to_lowercase(), party);
+            self = self.with_party(name, party);
         }
         self
     }
 
     /// Starts building a transaction invocation.
     ///
-    /// Loads the transaction from the protocol and adapts it — together with
-    /// the selected profile — into a plain [`TxBuilder`], the same value a
-    /// generated codegen client constructs directly, so both drive an
-    /// identical resolve path.
+    /// # Panics
     ///
-    /// # Errors
-    ///
-    /// Returns an error if the transaction name is unknown, the selected
-    /// profile is unknown, or a bound party is not declared by the protocol.
-    pub fn tx(&self, name: impl Into<String>) -> Result<TxBuilder, Error> {
+    /// Panics if `name` is not a transaction declared by the protocol —
+    /// consistent with [`with_profile`](Self::with_profile) and
+    /// [`with_party`](Self::with_party). For dynamic callers that need to
+    /// branch on tx presence, check membership before calling.
+    pub fn tx(&self, name: impl Into<String>) -> TxBuilder {
         let name = name.into();
-        let invocation = self.protocol.invoke(&name, self.profile.as_deref())?;
+        let tir = self
+            .transactions
+            .get(&name)
+            .unwrap_or_else(|| panic!("unknown transaction `{name}`"))
+            .clone();
 
-        let known_parties: HashSet<String> = self
-            .protocol
-            .parties()
-            .keys()
-            .map(|key| key.to_lowercase())
-            .collect();
+        TxBuilder::new(tir, self.trp.clone())
+            .env(self.env())
+            .parties(self.merged_parties())
+    }
 
-        for party in self.parties.keys() {
-            if !known_parties.contains(party) {
-                return Err(Error::UnknownParty(party.clone()));
+    fn env(&self) -> EnvMap {
+        self.selected_profile
+            .as_ref()
+            .map(|profile| profile.environment.clone())
+            .unwrap_or_default()
+    }
+
+    fn merged_parties(&self) -> HashMap<String, Party> {
+        let mut merged = HashMap::new();
+        if let Some(profile) = &self.selected_profile {
+            for (name, address) in &profile.parties {
+                merged.insert(name.to_lowercase(), Party::address(address.clone()));
             }
         }
-
-        let (tir, env) = invocation.into_parts();
-
-        Ok(TxBuilder {
-            tir,
-            env,
-            trp: self.trp.clone(),
-            args: ArgMap::new(),
-            parties: self.parties.clone(),
-        })
+        for (name, party) in &self.bound_parties {
+            merged.insert(name.clone(), party.clone());
+        }
+        merged
     }
 }
 

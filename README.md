@@ -52,14 +52,14 @@ async fn main() -> Result<(), tx3_sdk::Error> {
         "word1 word2 ... word24",
     )?;
 
-    let tx3 = Tx3Client::new(protocol, trp)
+    let tx3 = Tx3Client::from_protocol(protocol, trp)
         .with_profile("preprod")
         .with_party("sender", Party::signer(signer))
         .with_party("receiver", Party::address("addr_test1..."));
 
     // 4. Build, resolve, sign, submit, and wait for confirmation
     let status = tx3
-        .tx("transfer")?
+        .tx("transfer")
         .arg("quantity", json!(10_000_000))
         .resolve()
         .await?
@@ -142,7 +142,7 @@ returned witness before `sign()`:
 
 ```rust
 let resolved = tx3
-    .tx("transfer")?
+    .tx("transfer")
     .arg("quantity", json!(10_000_000))
     .resolve()
     .await?;

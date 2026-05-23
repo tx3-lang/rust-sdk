@@ -23,14 +23,14 @@
 //!     headers: None,
 //! });
 //!
-//! let tx3 = Tx3Client::new(protocol, trp)
+//! let tx3 = Tx3Client::from_protocol(protocol, trp)
 //!     .with_profile("preprod")
 //!     .with_party("sender", Party::signer(signer))
 //!     .with_party("receiver", Party::address("addr_test1..."))
 //!     .with_party("middleman", Party::address("addr_test1..."));
 //!
 //! let status = tx3
-//!     .tx("transfer")?
+//!     .tx("transfer")
 //!     .arg("quantity", json!(10_000_000))
 //!     .resolve()
 //!     .await?
@@ -47,7 +47,6 @@
 //!
 //! - [TX3 Documentation](https://docs.txpipe.io/tx3)
 
-pub mod codegen;
 pub mod core;
 pub mod facade;
 pub mod tii;
@@ -55,6 +54,6 @@ pub mod trp;
 
 pub use facade::signer::{CardanoSigner, Ed25519Signer};
 pub use facade::{
-    Error, Party, PollConfig, ResolvedTx, SignRequest, SignedTx, Signer, SubmittedTx, Tx3Client,
-    TxBuilder, WitnessInfo,
+    Error, Party, PollConfig, Profile, ResolvedTx, SignRequest, SignedTx, Signer, SubmittedTx,
+    Tx3Client, TxBuilder, WitnessInfo,
 };
