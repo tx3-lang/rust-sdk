@@ -34,6 +34,7 @@ done
 # Public surface of the generated lifecycle client.
 for sym in \
   'pub const TARGET_TII_VERSION' \
+  'pub static TRANSFER_TIR: LazyLock<TirEnvelope>' \
   'pub struct TransferParams' \
   'pub struct Client' \
   'pub struct ClientBuilder' \

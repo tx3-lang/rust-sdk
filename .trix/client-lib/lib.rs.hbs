@@ -2,6 +2,7 @@
 // Target TII version: {{tii.tii.version}}
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use serde::Serialize;
 use tx3_sdk::core::{ArgMap, TirEncoding, TirEnvelope};
@@ -25,20 +26,14 @@ pub const ENVIRONMENT_SCHEMA: &str = r#"{{{json tii.environment}}}"#;
 /// param schemas nor environment schemas are.
 const PROFILES_JSON: &str = r#"{{{json tii.profiles}}}"#;
 
-fn transactions() -> HashMap<String, TirEnvelope> {
-    let mut map = HashMap::new();
 {{#each tii.transactions}}
-    map.insert(
-        "{{@key}}".to_string(),
-        TirEnvelope {
-            content: "{{tir.content}}".to_string(),
-            encoding: TirEncoding::{{pascalCase tir.encoding}},
-            version: "{{tir.version}}".to_string(),
-        },
-    );
+/// Embedded TIR envelope for the `{{@key}}` transaction.
+pub static {{constantCase @key}}_TIR: LazyLock<TirEnvelope> = LazyLock::new(|| TirEnvelope {
+    content: "{{tir.content}}".to_string(),
+    encoding: TirEncoding::{{pascalCase tir.encoding}},
+    version: "{{tir.version}}".to_string(),
+});
 {{/each}}
-    map
-}
 
 {{#each tii.transactions}}
 /// Arguments for the {{@key}} transaction.
@@ -84,9 +79,14 @@ impl Client {
     /// fragments and the given TRP options. Configure profile / parties /
     /// env, then `build()`.
     pub fn builder(options: ClientOptions) -> ClientBuilder {
+        let mut transactions = HashMap::new();
+{{#each tii.transactions}}
+        transactions.insert("{{@key}}".to_string(), {{constantCase @key}}_TIR.clone());
+{{/each}}
+
         ClientBuilder {
             inner: Tx3ClientBuilder::from_parts(
-                transactions(),
+                transactions,
                 Profile::load_all(PROFILES_JSON),
                 Default::default(),
             )
