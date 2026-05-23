@@ -275,6 +275,20 @@ impl Tx3Client {
         Ok(self)
     }
 
+    /// Binds a party without validating the name against the protocol's
+    /// declared parties. Intended for codegen-generated wrappers — see
+    /// [`Tx3ClientBuilder::with_party_unchecked`]. Hand-written code SHOULD
+    /// use [`Tx3Client::with_party`].
+    pub fn with_party_unchecked(
+        mut self,
+        name: impl Into<String>,
+        party: Party,
+    ) -> Self {
+        self.bound_parties
+            .insert(name.into().to_lowercase(), party);
+        self
+    }
+
     /// Binds multiple parties at once. See [`Tx3Client::with_party`].
     pub fn with_parties<I, K>(mut self, parties: I) -> Result<Self, Error>
     where
@@ -359,6 +373,7 @@ pub struct Tx3ClientBuilder {
     trp_options: Option<trp::ClientOptions>,
     profile: Option<String>,
     parties: HashMap<String, Party>,
+    unchecked_parties: HashMap<String, Party>,
     env_overrides: EnvMap,
 }
 
@@ -385,6 +400,7 @@ impl Tx3ClientBuilder {
             trp_options: None,
             profile: None,
             parties: HashMap::new(),
+            unchecked_parties: HashMap::new(),
             env_overrides: EnvMap::new(),
         }
     }
@@ -454,9 +470,23 @@ impl Tx3ClientBuilder {
     }
 
     /// Binds a party (signer or read-only address) by name. Validated in
-    /// `build()`.
+    /// `build()` against the protocol's declared parties.
     pub fn with_party(mut self, name: impl Into<String>, party: Party) -> Self {
         self.parties.insert(name.into().to_lowercase(), party);
+        self
+    }
+
+    /// Binds a party without validating the name against the protocol's
+    /// declared parties. The entry is carried straight through to the built
+    /// client.
+    ///
+    /// Intended for codegen-generated wrappers, which materialize one typed
+    /// setter per declared party — the name is baked in at codegen time, so
+    /// runtime validation would always pass and the embedded party-name set
+    /// can be omitted. Hand-written code SHOULD use [`Tx3ClientBuilder::with_party`].
+    pub fn with_party_unchecked(mut self, name: impl Into<String>, party: Party) -> Self {
+        self.unchecked_parties
+            .insert(name.into().to_lowercase(), party);
         self
     }
 
@@ -516,11 +546,14 @@ impl Tx3ClientBuilder {
 
         let trp = trp::Client::new(trp_options);
 
+        let mut bound_parties = self.parties;
+        bound_parties.extend(self.unchecked_parties);
+
         Ok(Tx3Client::from_parts(
             self.transactions,
             self.known_parties,
             trp,
-            self.parties,
+            bound_parties,
             selected_profile,
             self.env_overrides,
         ))
