@@ -181,8 +181,9 @@ impl Party {
 /// addresses keyed by name.
 ///
 /// Produced either by deconstructing a loaded [`Protocol`] inside
-/// [`Tx3ClientBuilder::from_protocol`] or by parsing the JSON a generated
-/// codegen client embeds (via [`Profile::load_all`]).
+/// [`Tx3ClientBuilder::from_protocol`] or by parsing the per-profile JSON
+/// blob a generated codegen client embeds (via `serde_json::from_str` —
+/// `Profile` derives `Deserialize`).
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Profile {
     /// Environment values applied to every transaction under this profile.
@@ -191,19 +192,6 @@ pub struct Profile {
     /// Party addresses applied to every transaction under this profile.
     #[serde(default)]
     pub parties: HashMap<String, String>,
-}
-
-impl Profile {
-    /// Parses a JSON map of profiles in the shape the codegen template embeds
-    /// (`{ "profileName": { "environment": { ... }, "parties": { ... } }, ... }`).
-    ///
-    /// # Panics
-    ///
-    /// Panics if the JSON does not parse — codegen produces a valid map by
-    /// construction, so a panic indicates a bug in the template.
-    pub fn load_all(json: &str) -> HashMap<String, Profile> {
-        serde_json::from_str(json).expect("codegen: invalid embedded profiles")
-    }
 }
 
 /// High-level client over a TX3 protocol.

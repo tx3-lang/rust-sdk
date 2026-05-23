@@ -21,10 +21,13 @@ pub const TARGET_TII_VERSION: &str = "{{tii.tii.version}}";
 pub const ENVIRONMENT_SCHEMA: &str = r#"{{{json tii.environment}}}"#;
 {{/if}}
 
-/// Per-profile environment + party-address map, embedded from `tii.profiles`.
-/// This is the only profile data carried into the generated crate — neither
-/// param schemas nor environment schemas are.
-const PROFILES_JSON: &str = r#"{{{json tii.profiles}}}"#;
+{{#each tii.profiles}}
+/// Embedded `{{@key}}` profile (environment values + party addresses).
+pub static {{constantCase @key}}_PROFILE: LazyLock<Profile> = LazyLock::new(|| {
+    serde_json::from_str(r#"{{{json this}}}"#)
+        .expect("codegen invariant: embedded profile parses")
+});
+{{/each}}
 
 {{#each tii.transactions}}
 /// Embedded TIR envelope for the `{{@key}}` transaction.
@@ -84,13 +87,14 @@ impl Client {
         transactions.insert("{{@key}}".to_string(), {{constantCase @key}}_TIR.clone());
 {{/each}}
 
+        let mut profiles = HashMap::new();
+{{#each tii.profiles}}
+        profiles.insert("{{@key}}".to_string(), {{constantCase @key}}_PROFILE.clone());
+{{/each}}
+
         ClientBuilder {
-            inner: Tx3ClientBuilder::from_parts(
-                transactions,
-                Profile::load_all(PROFILES_JSON),
-                Default::default(),
-            )
-            .trp(options),
+            inner: Tx3ClientBuilder::from_parts(transactions, profiles, Default::default())
+                .trp(options),
         }
     }
 

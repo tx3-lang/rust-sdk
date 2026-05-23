@@ -35,6 +35,7 @@ done
 for sym in \
   'pub const TARGET_TII_VERSION' \
   'pub static TRANSFER_TIR: LazyLock<TirEnvelope>' \
+  'pub static PREPROD_PROFILE: LazyLock<Profile>' \
   'pub struct TransferParams' \
   'pub struct Client' \
   'pub struct ClientBuilder' \
