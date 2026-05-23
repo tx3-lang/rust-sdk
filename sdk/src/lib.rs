@@ -24,13 +24,13 @@
 //! });
 //!
 //! let tx3 = Tx3Client::from_protocol(protocol, trp)
-//!     .with_profile("preprod")
-//!     .with_party("sender", Party::signer(signer))
-//!     .with_party("receiver", Party::address("addr_test1..."))
-//!     .with_party("middleman", Party::address("addr_test1..."));
+//!     .with_profile("preprod")?
+//!     .with_party("sender", Party::signer(signer))?
+//!     .with_party("receiver", Party::address("addr_test1..."))?
+//!     .with_party("middleman", Party::address("addr_test1..."))?;
 //!
 //! let status = tx3
-//!     .tx("transfer")
+//!     .tx("transfer")?
 //!     .arg("quantity", json!(10_000_000))
 //!     .resolve()
 //!     .await?

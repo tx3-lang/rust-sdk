@@ -114,12 +114,17 @@ async fn test_trp_happy_path_lifecycle() {
 
     let tx3 = Tx3Client::from_protocol(protocol, trp.clone())
         .with_profile("preprod")
+        .expect("WITH_PROFILE FAILED: profile must be declared")
         .with_party("sender", Party::signer(signer))
+        .expect("WITH_PARTY FAILED: sender must be declared")
         .with_party("middleman", Party::address(&party_b))
-        .with_party("receiver", Party::address(&party_b));
+        .expect("WITH_PARTY FAILED: middleman must be declared")
+        .with_party("receiver", Party::address(&party_b))
+        .expect("WITH_PARTY FAILED: receiver must be declared");
 
     let resolved = tx3
         .tx("transfer")
+        .expect("TX FAILED: transfer must be declared")
         .arg("quantity", json!(10_000_000))
         .resolve()
         .await

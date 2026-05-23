@@ -90,9 +90,14 @@ impl Client {
     ///
     /// # Panics
     ///
-    /// Panics if `name` is not a profile declared by the protocol.
+    /// Panics if `name` is not a profile declared by the protocol. The
+    /// codegen-embedded protocol is the contract: passing a name outside its
+    /// declared profiles is a programmer error.
     pub fn with_profile(mut self, name: &str) -> Self {
-        self.0 = self.0.with_profile(name);
+        self.0 = self
+            .0
+            .with_profile(name)
+            .expect("codegen invariant: profile is declared by the protocol");
         self
     }
 
@@ -104,7 +109,10 @@ impl Client {
     ///
     /// Panics if `name` is not a party declared by the protocol.
     pub fn with_party(mut self, name: impl Into<String>, party: Party) -> Self {
-        self.0 = self.0.with_party(name, party);
+        self.0 = self
+            .0
+            .with_party(name, party)
+            .expect("codegen invariant: party is declared by the protocol");
         self
     }
 {{#each tii.transactions}}
@@ -112,7 +120,10 @@ impl Client {
     /// Builds the {{@key}} transaction. Drive the returned builder with
     /// `.resolve().await?` and the rest of the lifecycle chain.
     pub fn {{snakeCase @key}}(&self, args: {{pascalCase @key}}Params) -> TxBuilder {
-        self.0.tx("{{@key}}").args(args.into())
+        self.0
+            .tx("{{@key}}")
+            .expect("codegen invariant: tx is declared by the protocol")
+            .args(args.into())
     }
 {{/each}}
 }

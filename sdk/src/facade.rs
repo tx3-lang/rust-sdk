@@ -33,6 +33,18 @@ pub enum Error {
     #[error(transparent)]
     Trp(#[from] crate::trp::Error),
 
+    /// A transaction name was not declared by the protocol.
+    #[error("unknown transaction: {0}")]
+    UnknownTx(String),
+
+    /// A profile name was not declared by the protocol.
+    #[error("unknown profile: {0}")]
+    UnknownProfile(String),
+
+    /// A party name was not declared by the protocol.
+    #[error("unknown party: {0}")]
+    UnknownParty(String),
+
     /// Signer failed to produce a witness.
     #[error("signer error: {0}")]
     Signer(#[source] Box<dyn std::error::Error + Send + Sync>),
@@ -294,66 +306,70 @@ impl Tx3Client {
     /// Selects a profile by name. Its environment values and party addresses
     /// apply to every subsequent transaction.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if `name` is not a profile declared by the protocol.
-    pub fn with_profile(mut self, name: &str) -> Self {
+    /// Returns [`Error::UnknownProfile`] if `name` is not a profile declared
+    /// by the protocol.
+    pub fn with_profile(mut self, name: &str) -> Result<Self, Error> {
         let profile = self
             .profiles
             .get(name)
             .cloned()
-            .unwrap_or_else(|| panic!("unknown profile `{name}`"));
+            .ok_or_else(|| Error::UnknownProfile(name.to_string()))?;
         self.selected_profile = Some(profile);
-        self
+        Ok(self)
     }
 
     /// Binds a party (signer or read-only address) by name.
     ///
     /// Overrides any address the selected profile declared for the same name.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if `name` is not a party declared by the protocol.
-    pub fn with_party(mut self, name: impl Into<String>, party: Party) -> Self {
+    /// Returns [`Error::UnknownParty`] if `name` is not a party declared by
+    /// the protocol.
+    pub fn with_party(
+        mut self,
+        name: impl Into<String>,
+        party: Party,
+    ) -> Result<Self, Error> {
         let name = name.into().to_lowercase();
         if !self.known_parties.contains(&name) {
-            panic!("unknown party `{name}`");
+            return Err(Error::UnknownParty(name));
         }
         self.bound_parties.insert(name, party);
-        self
+        Ok(self)
     }
 
     /// Binds multiple parties at once. See [`Tx3Client::with_party`].
-    pub fn with_parties<I, K>(mut self, parties: I) -> Self
+    pub fn with_parties<I, K>(mut self, parties: I) -> Result<Self, Error>
     where
         I: IntoIterator<Item = (K, Party)>,
         K: Into<String>,
     {
         for (name, party) in parties {
-            self = self.with_party(name, party);
+            self = self.with_party(name, party)?;
         }
-        self
+        Ok(self)
     }
 
     /// Starts building a transaction invocation.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if `name` is not a transaction declared by the protocol —
-    /// consistent with [`with_profile`](Self::with_profile) and
-    /// [`with_party`](Self::with_party). For dynamic callers that need to
-    /// branch on tx presence, check membership before calling.
-    pub fn tx(&self, name: impl Into<String>) -> TxBuilder {
+    /// Returns [`Error::UnknownTx`] if `name` is not a transaction declared
+    /// by the protocol.
+    pub fn tx(&self, name: impl Into<String>) -> Result<TxBuilder, Error> {
         let name = name.into();
         let tir = self
             .transactions
             .get(&name)
-            .unwrap_or_else(|| panic!("unknown transaction `{name}`"))
-            .clone();
+            .cloned()
+            .ok_or(Error::UnknownTx(name))?;
 
-        TxBuilder::new(tir, self.trp.clone())
+        Ok(TxBuilder::new(tir, self.trp.clone())
             .env(self.env())
-            .parties(self.merged_parties())
+            .parties(self.merged_parties()))
     }
 
     fn env(&self) -> EnvMap {
