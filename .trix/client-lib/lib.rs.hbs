@@ -102,20 +102,18 @@ impl Client {
         }
     }
 
-    /// Binds a party (signer or read-only address) by name after the client
-    /// has been built. Overrides any address declared for that party by the
-    /// selected profile.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `name` is not a party declared by the protocol.
-    pub fn with_party(mut self, name: impl Into<String>, party: Party) -> Self {
+{{#each tii.parties}}
+    /// Binds the `{{@key}}` party (signer or read-only address) after the
+    /// client has been built. Overrides any address declared for that party
+    /// by the selected profile.
+    pub fn with_{{snakeCase @key}}(mut self, party: Party) -> Self {
         self.0 = self
             .0
-            .with_party(name, party)
+            .with_party("{{@key}}", party)
             .expect("codegen invariant: party is declared by the protocol");
         self
     }
+{{/each}}
 {{#each tii.transactions}}
 
     /// Builds the {{@key}} transaction. Drive the returned builder with
@@ -145,13 +143,15 @@ impl ClientBuilder {
         self
     }
 
-    /// Binds a party (signer or read-only address) by name. Validated on
-    /// [`ClientBuilder::build`].
-    pub fn with_party(mut self, name: impl Into<String>, party: Party) -> Self {
-        self.inner = self.inner.with_party(name, party);
+{{#each tii.parties}}
+    /// Binds the `{{@key}}` party (signer or read-only address). Validated
+    /// on [`ClientBuilder::build`].
+    pub fn with_{{snakeCase @key}}(mut self, party: Party) -> Self {
+        self.inner = self.inner.with_party("{{@key}}", party);
         self
     }
 
+{{/each}}
     /// Sets a single environment value. Merged on top of the selected
     /// profile's environment at resolve time.
     pub fn with_env_value(

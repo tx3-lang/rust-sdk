@@ -40,12 +40,20 @@ for sym in \
   'pub fn new(options: ClientOptions)' \
   'pub fn builder(options: ClientOptions) -> ClientBuilder' \
   'pub fn with_profile' \
-  'pub fn with_party' \
+  'pub fn with_sender(' \
+  'pub fn with_receiver(' \
+  'pub fn with_middleman(' \
   'pub fn with_env_value' \
   'pub fn build(self) -> Client' \
   'pub fn transfer(&self, args: TransferParams) -> TxBuilder'; do
   grep -qF "$sym" "$gen/lib.rs" || { echo "generated lib.rs missing: $sym"; exit 1; }
 done
+
+# A generic with_party(name, party) MUST NOT leak through the typed wrapper.
+if grep -qE 'pub fn with_party' "$gen/lib.rs"; then
+  echo "generated lib.rs exposes generic with_party — should be typed per party"
+  exit 1
+fi
 
 # Compile against the SDK in this checkout — the template may require a
 # `tx3-sdk` version not yet published to crates.io.
