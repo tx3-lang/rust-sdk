@@ -35,11 +35,14 @@ done
 for sym in \
   'pub const TARGET_TII_VERSION' \
   'pub struct TransferParams' \
-  'pub fn transfer_tir' \
   'pub struct Client' \
+  'pub struct ClientBuilder' \
   'pub fn new(options: ClientOptions)' \
+  'pub fn builder(options: ClientOptions) -> ClientBuilder' \
   'pub fn with_profile' \
   'pub fn with_party' \
+  'pub fn with_env_value' \
+  'pub fn build(self) -> Client' \
   'pub fn transfer(&self, args: TransferParams) -> TxBuilder'; do
   grep -qF "$sym" "$gen/lib.rs" || { echo "generated lib.rs missing: $sym"; exit 1; }
 done

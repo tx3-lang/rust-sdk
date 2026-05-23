@@ -32,32 +32,25 @@ tokio = { version = "1", features = ["full"] }
 
 ```rust
 use serde_json::json;
-use tx3_sdk::trp::{Client, ClientOptions};
-use tx3_sdk::{CardanoSigner, Party, PollConfig, Tx3Client};
+use tx3_sdk::{CardanoSigner, Party, PollConfig};
 
 #[tokio::main]
 async fn main() -> Result<(), tx3_sdk::Error> {
-    // 1. Load a compiled .tii protocol
-    let protocol = tx3_sdk::tii::Protocol::from_file("./examples/transfer.tii")?;
-
-    // 2. Connect to a TRP server
-    let trp = Client::new(ClientOptions {
-        endpoint: "https://trp.example.com".to_string(),
-        headers: None,
-    });
-
-    // 3. Configure signer and parties
     let signer = CardanoSigner::from_mnemonic(
         "addr_test1...",
         "word1 word2 ... word24",
     )?;
 
-    let tx3 = Tx3Client::new(protocol, trp)
-        .with_profile("preprod")?
-        .with_party("sender", Party::signer(signer))?
-        .with_party("receiver", Party::address("addr_test1..."))?;
+    // 1. Load a compiled .tii protocol and assemble the client through the builder.
+    let tx3 = tx3_sdk::tii::Protocol::from_file("./examples/transfer.tii")?
+        .client()
+        .trp_endpoint("https://trp.example.com")
+        .with_profile("preprod")
+        .with_party("sender", Party::signer(signer))
+        .with_party("receiver", Party::address("addr_test1..."))
+        .build()?;
 
-    // 4. Build, resolve, sign, submit, and wait for confirmation
+    // 2. Build, resolve, sign, submit, and wait for confirmation
     let status = tx3
         .tx("transfer")?
         .arg("quantity", json!(10_000_000))
@@ -79,6 +72,7 @@ async fn main() -> Result<(), tx3_sdk::Error> {
 | SDK Type | Glossary Term | Description |
 |---|---|---|
 | `tii::Protocol` | TII / Protocol | Loaded `.tii` exposing transactions, parties, profiles |
+| `Tx3ClientBuilder` | Client builder | Fluent builder obtained via `Protocol::client()`; validates on `build()` |
 | `Tx3Client` | Facade | Entry point holding protocol, TRP client, and party bindings |
 | `TxBuilder` | Invocation builder | Collects args, resolves via TRP |
 | `Party` | Party | `Party::address(...)` (read-only) or `Party::signer(...)` (signing) |

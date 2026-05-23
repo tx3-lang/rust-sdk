@@ -31,7 +31,7 @@ use std::env;
 use serde_json::json;
 use tx3_sdk::tii::Protocol;
 use tx3_sdk::trp::{Client, ClientOptions};
-use tx3_sdk::{CardanoSigner, Party, PollConfig, Tx3Client};
+use tx3_sdk::{CardanoSigner, Party, PollConfig};
 
 /// Gets required environment variable or prints a helpful message.
 fn get_required_env(var: &str) -> Option<String> {
@@ -60,9 +60,9 @@ fn get_trp_api_key() -> Option<String> {
     env::var("TRP_API_KEY_PREPROD").ok()
 }
 
-/// Creates a TRP client using the endpoint from environment.
-/// If TRP_API_KEY_PREPROD is set, it will be included as a header.
-fn create_trp_client() -> Option<Client> {
+/// Builds the TRP client options used by the test, or returns `None` if the
+/// endpoint env var is unset.
+fn trp_options() -> Option<ClientOptions> {
     let endpoint = get_required_env("TRP_ENDPOINT_PREPROD")?;
     let mut headers = HashMap::new();
 
@@ -71,14 +71,14 @@ fn create_trp_client() -> Option<Client> {
         headers.insert("dmtr-api-key".to_string(), api_key);
     }
 
-    Some(Client::new(ClientOptions {
+    Some(ClientOptions {
         endpoint,
         headers: if headers.is_empty() {
             None
         } else {
             Some(headers)
         },
-    }))
+    })
 }
 
 /// Loads the transfer.tii protocol file.
@@ -97,7 +97,7 @@ fn load_transfer_protocol() -> Protocol {
 #[tokio::test]
 async fn test_trp_happy_path_lifecycle() {
     // Check required configuration
-    let Some(trp) = create_trp_client() else {
+    let Some(options) = trp_options() else {
         println!("Skipping test: TRP_ENDPOINT_PREPROD not set");
         return;
     };
@@ -112,15 +112,15 @@ async fn test_trp_happy_path_lifecycle() {
     let signer =
         CardanoSigner::from_mnemonic(&party_a, &mnemonic_a).expect("Invalid mnemonic or address");
 
-    let tx3 = Tx3Client::new(protocol, trp.clone())
+    let tx3 = protocol
+        .client()
+        .trp(options.clone())
         .with_profile("preprod")
-        .expect("WITH_PROFILE FAILED: profile must be declared")
         .with_party("sender", Party::signer(signer))
-        .expect("WITH_PARTY FAILED: sender must be declared")
         .with_party("middleman", Party::address(&party_b))
-        .expect("WITH_PARTY FAILED: middleman must be declared")
         .with_party("receiver", Party::address(&party_b))
-        .expect("WITH_PARTY FAILED: receiver must be declared");
+        .build()
+        .expect("BUILD FAILED: builder must validate against the protocol");
 
     let resolved = tx3
         .tx("transfer")
@@ -144,7 +144,8 @@ async fn test_trp_happy_path_lifecycle() {
     let _status = match submitted.wait_for_confirmed(poll_config).await {
         Ok(status) => status,
         Err(err) => {
-            let _ = trp.check_status(vec![submitted.hash.clone()]).await;
+            let standalone = Client::new(options);
+            let _ = standalone.check_status(vec![submitted.hash.clone()]).await;
             panic!("CONFIRMED CHECK FAILED: Transaction did not confirm in time: {err}");
         }
     };

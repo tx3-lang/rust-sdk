@@ -337,6 +337,13 @@ impl Protocol {
     pub fn profiles(&self) -> &HashMap<String, spec::Profile> {
         &self.spec.profiles
     }
+
+    /// Starts a [`Tx3ClientBuilder`] for this protocol. Configure TRP options,
+    /// optional profile selection, party bindings, and env overrides, then
+    /// call `build()` to obtain a [`crate::Tx3Client`].
+    pub fn client(self) -> crate::facade::Tx3ClientBuilder {
+        crate::facade::Tx3ClientBuilder::from_protocol(self)
+    }
 }
 
 /// Type of a transaction parameter.
