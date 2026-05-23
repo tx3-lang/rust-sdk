@@ -332,6 +332,11 @@ impl Protocol {
     pub fn parties(&self) -> &HashMap<String, spec::Party> {
         &self.spec.parties
     }
+
+    /// Returns all profiles defined in the protocol.
+    pub fn profiles(&self) -> &HashMap<String, spec::Profile> {
+        &self.spec.profiles
+    }
 }
 
 /// Type of a transaction parameter.

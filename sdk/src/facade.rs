@@ -7,12 +7,13 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde::Deserialize;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::core::{ArgMap, BytesEnvelope};
+use crate::core::{ArgMap, BytesEnvelope, EnvMap, TirEnvelope};
 use crate::tii::Protocol;
-use crate::trp::{self, SubmitParams, TxStage, TxStatus, TxWitness};
+use crate::trp::{self, ResolveParams, SubmitParams, TxStage, TxStatus, TxWitness};
 
 #[derive(Clone)]
 struct SignerParty {
@@ -32,11 +33,15 @@ pub enum Error {
     #[error(transparent)]
     Trp(#[from] crate::trp::Error),
 
-    /// Required parameters were not provided.
-    #[error("missing required params: {0:?}")]
-    MissingParams(Vec<String>),
+    /// A transaction name was not declared by the protocol.
+    #[error("unknown transaction: {0}")]
+    UnknownTx(String),
 
-    /// A party was provided but not declared in the protocol.
+    /// A profile name was not declared by the protocol.
+    #[error("unknown profile: {0}")]
+    UnknownProfile(String),
+
+    /// A party name was not declared by the protocol.
     #[error("unknown party: {0}")]
     UnknownParty(String),
 
@@ -168,76 +173,301 @@ impl Party {
     }
 }
 
-/// High-level client that ties a protocol to a TRP client.
+/// A named profile baked into a client: environment values and party
+/// addresses keyed by name.
+///
+/// Produced either by deconstructing a loaded [`Protocol`] (via
+/// [`Tx3Client::new`]) or by parsing the JSON a generated codegen client
+/// embeds (via [`Profile::load_all`]).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct Profile {
+    /// Environment values applied to every transaction under this profile.
+    #[serde(default)]
+    pub environment: EnvMap,
+    /// Party addresses applied to every transaction under this profile.
+    #[serde(default)]
+    pub parties: HashMap<String, String>,
+}
+
+impl Profile {
+    /// Parses a JSON map of profiles, the shape the codegen template embeds.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the JSON does not parse — codegen produces a valid map by
+    /// construction, so a panic indicates a bug in the template.
+    pub fn load_all(json: &str) -> HashMap<String, Profile> {
+        serde_json::from_str(json).expect("codegen: invalid embedded profiles")
+    }
+}
+
+/// High-level client over a TX3 protocol.
+///
+/// Holds the deconstructed protocol parts — per-transaction TIR envelopes,
+/// named profiles, the set of declared party names — plus the runtime state
+/// (TRP client, bound parties, selected profile). One client type backs both
+/// flows: the *dynamic* flow constructs it from a loaded [`Protocol`] via
+/// [`Tx3Client::new`]; the *codegen* flow constructs it from the parts a
+/// generated client embeds via [`Tx3Client::from_parts`].
 #[derive(Clone)]
 pub struct Tx3Client {
-    protocol: Arc<Protocol>,
+    transactions: HashMap<String, TirEnvelope>,
+    profiles: HashMap<String, Profile>,
+    known_parties: HashSet<String>,
     trp: trp::Client,
-    parties: HashMap<String, Party>,
-    profile: Option<String>,
+    bound_parties: HashMap<String, Party>,
+    selected_profile: Option<Profile>,
 }
 
 impl Tx3Client {
-    /// Creates a new facade client.
-    pub fn new(protocol: Protocol, trp: trp::Client) -> Self {
+    /// Constructs a client from already-deconstructed protocol parts.
+    ///
+    /// The codegen entry point: a generated client embeds the per-transaction
+    /// TIR envelopes, named profiles, and the set of declared party names at
+    /// codegen time and passes them here.
+    pub fn from_parts(
+        transactions: HashMap<String, TirEnvelope>,
+        profiles: HashMap<String, Profile>,
+        known_parties: HashSet<String>,
+        trp: trp::Client,
+    ) -> Self {
+        let known_parties = known_parties
+            .into_iter()
+            .map(|name| name.to_lowercase())
+            .collect();
         Self {
-            protocol: Arc::new(protocol),
+            transactions,
+            profiles,
+            known_parties,
             trp,
-            parties: HashMap::new(),
-            profile: None,
+            bound_parties: HashMap::new(),
+            selected_profile: None,
         }
     }
 
-    /// Sets the profile for all invocations created by this client.
+    /// Constructs a client from a loaded [`Protocol`], deconstructing it into
+    /// the parts the client stores locally. The runtime no longer holds onto
+    /// the `Protocol` after this call.
+    pub fn new(protocol: Protocol, trp: trp::Client) -> Self {
+        let transactions = protocol
+            .txs()
+            .iter()
+            .map(|(name, tx)| (name.clone(), tx.tir.clone()))
+            .collect();
+
+        let profiles = protocol
+            .profiles()
+            .iter()
+            .map(|(name, profile)| {
+                let environment = profile
+                    .environment
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default();
+                (
+                    name.clone(),
+                    Profile {
+                        environment,
+                        parties: profile.parties.clone(),
+                    },
+                )
+            })
+            .collect();
+
+        let known_parties = protocol.parties().keys().cloned().collect();
+
+        Self::from_parts(transactions, profiles, known_parties, trp)
+    }
+
+    /// Loads a [`Protocol`] from a file path and constructs a client from it.
+    pub fn from_file(
+        path: impl AsRef<std::path::Path>,
+        trp: trp::Client,
+    ) -> Result<Self, Error> {
+        let protocol = Protocol::from_file(path)?;
+        Ok(Self::new(protocol, trp))
+    }
+
+    /// Parses a TII JSON string and constructs a client from it.
+    pub fn from_string(code: String, trp: trp::Client) -> Result<Self, Error> {
+        let protocol = Protocol::from_string(code)?;
+        Ok(Self::new(protocol, trp))
+    }
+
+    /// Parses a TII JSON value and constructs a client from it.
+    pub fn from_json(json: serde_json::Value, trp: trp::Client) -> Result<Self, Error> {
+        let protocol = Protocol::from_json(json)?;
+        Ok(Self::new(protocol, trp))
+    }
+
+    /// Selects a profile by name. Its environment values and party addresses
+    /// apply to every subsequent transaction.
     ///
-    /// This profile is applied to every invocation created by the client.
-    pub fn with_profile(mut self, profile: impl Into<String>) -> Self {
-        self.profile = Some(profile.into());
-        self
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownProfile`] if `name` is not a profile declared
+    /// by the protocol.
+    pub fn with_profile(mut self, name: &str) -> Result<Self, Error> {
+        let profile = self
+            .profiles
+            .get(name)
+            .cloned()
+            .ok_or_else(|| Error::UnknownProfile(name.to_string()))?;
+        self.selected_profile = Some(profile);
+        Ok(self)
     }
 
-    /// Attaches a party definition to this client.
-    pub fn with_party(mut self, name: impl Into<String>, party: Party) -> Self {
-        self.parties.insert(name.into().to_lowercase(), party);
-        self
+    /// Binds a party (signer or read-only address) by name.
+    ///
+    /// Overrides any address the selected profile declared for the same name.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownParty`] if `name` is not a party declared by
+    /// the protocol.
+    pub fn with_party(
+        mut self,
+        name: impl Into<String>,
+        party: Party,
+    ) -> Result<Self, Error> {
+        let name = name.into().to_lowercase();
+        if !self.known_parties.contains(&name) {
+            return Err(Error::UnknownParty(name));
+        }
+        self.bound_parties.insert(name, party);
+        Ok(self)
     }
 
-    /// Attaches multiple party definitions to this client.
-    pub fn with_parties<I, K>(mut self, parties: I) -> Self
+    /// Binds multiple parties at once. See [`Tx3Client::with_party`].
+    pub fn with_parties<I, K>(mut self, parties: I) -> Result<Self, Error>
     where
         I: IntoIterator<Item = (K, Party)>,
         K: Into<String>,
     {
         for (name, party) in parties {
-            self.parties.insert(name.into().to_lowercase(), party);
+            self = self.with_party(name, party)?;
         }
-        self
+        Ok(self)
     }
 
     /// Starts building a transaction invocation.
-    pub fn tx(&self, name: impl Into<String>) -> TxBuilder {
-        TxBuilder {
-            protocol: Arc::clone(&self.protocol),
-            trp: self.trp.clone(),
-            tx_name: name.into(),
-            args: ArgMap::new(),
-            parties: self.parties.clone(),
-            profile: self.profile.clone(),
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownTx`] if `name` is not a transaction declared
+    /// by the protocol.
+    pub fn tx(&self, name: impl Into<String>) -> Result<TxBuilder, Error> {
+        let name = name.into();
+        let tir = self
+            .transactions
+            .get(&name)
+            .cloned()
+            .ok_or(Error::UnknownTx(name))?;
+
+        Ok(TxBuilder::new(tir, self.trp.clone())
+            .env(self.env())
+            .parties(self.merged_parties()))
+    }
+
+    fn env(&self) -> EnvMap {
+        self.selected_profile
+            .as_ref()
+            .map(|profile| profile.environment.clone())
+            .unwrap_or_default()
+    }
+
+    fn merged_parties(&self) -> HashMap<String, Party> {
+        let mut merged = HashMap::new();
+        if let Some(profile) = &self.selected_profile {
+            for (name, address) in &profile.parties {
+                merged.insert(name.to_lowercase(), Party::address(address.clone()));
+            }
         }
+        for (name, party) in &self.bound_parties {
+            merged.insert(name.clone(), party.clone());
+        }
+        merged
+    }
+}
+
+/// Assembles the TRP resolve request shared by every [`TxBuilder`].
+///
+/// `env` (profile values, with any profile-declared party addresses already
+/// folded in), bound party addresses, and caller-supplied `args` are merged
+/// into a single argument map, in increasing order of precedence. The request
+/// `env` is left unset — TRP receives one argument map.
+fn build_resolve_params(
+    tir: TirEnvelope,
+    env: EnvMap,
+    parties: &HashMap<String, Party>,
+    args: ArgMap,
+) -> ResolveParams {
+    let mut merged = ArgMap::new();
+    merged.extend(env);
+    for (name, party) in parties {
+        merged.insert(
+            name.clone(),
+            Value::String(party.address_value().to_string()),
+        );
+    }
+    merged.extend(args);
+
+    ResolveParams {
+        tir,
+        args: merged,
+        env: None,
     }
 }
 
 /// Builder for transaction invocation.
+///
+/// A builder is a TIR envelope plus the environment, arguments, and party
+/// bindings needed to resolve it. Generated codegen clients construct one via
+/// [`TxBuilder::new`]; the dynamic [`Tx3Client`] constructs one by adapting a
+/// loaded [`Protocol`]. Both drive an identical resolve path.
 pub struct TxBuilder {
-    protocol: Arc<Protocol>,
+    tir: TirEnvelope,
+    env: EnvMap,
     trp: trp::Client,
-    tx_name: String,
     args: ArgMap,
     parties: HashMap<String, Party>,
-    profile: Option<String>,
 }
 
 impl TxBuilder {
+    /// Creates a builder from a TIR envelope.
+    ///
+    /// This is the entry point used by generated codegen clients: they bake the
+    /// per-transaction TIR and profile data into the generated source at
+    /// codegen time and drive the full `resolve → sign → submit → wait`
+    /// lifecycle without loading a `.tii` file. Supply environment values with
+    /// [`TxBuilder::env`] and signer/address bindings with [`TxBuilder::parties`].
+    pub fn new(tir: TirEnvelope, trp: trp::Client) -> Self {
+        TxBuilder {
+            tir,
+            env: EnvMap::new(),
+            trp,
+            args: ArgMap::new(),
+            parties: HashMap::new(),
+        }
+    }
+
+    /// Sets the environment values applied to this transaction.
+    pub fn env(mut self, env: EnvMap) -> Self {
+        self.env = env;
+        self
+    }
+
+    /// Attaches party definitions (signers or read-only addresses).
+    ///
+    /// Names are matched case-insensitively. Later entries override earlier
+    /// ones with the same name.
+    pub fn parties(mut self, parties: HashMap<String, Party>) -> Self {
+        for (name, party) in parties {
+            self.parties.insert(name.to_lowercase(), party);
+        }
+        self
+    }
+
     /// Adds a single argument (case-insensitive name).
     pub fn arg(mut self, name: &str, value: impl Into<Value>) -> Self {
         self.args.insert(name.to_lowercase(), value.into());
@@ -254,51 +484,25 @@ impl TxBuilder {
 
     /// Resolves the transaction using the TRP client.
     pub async fn resolve(self) -> Result<ResolvedTx, Error> {
-        let mut invocation = self
-            .protocol
-            .invoke(&self.tx_name, self.profile.as_deref())?;
+        let TxBuilder {
+            tir,
+            env,
+            trp,
+            args,
+            parties,
+        } = self;
 
-        let known_parties: HashSet<String> = self
-            .protocol
-            .parties()
-            .keys()
-            .map(|key| key.to_lowercase())
-            .collect();
+        let resolve_params = build_resolve_params(tir, env, &parties, args);
 
-        for (name, party) in &self.parties {
-            if !known_parties.contains(name) {
-                return Err(Error::UnknownParty(name.clone()));
-            }
+        let envelope = trp.resolve(resolve_params).await?;
 
-            invocation.set_arg(
-                name,
-                serde_json::Value::String(party.address_value().to_string()),
-            );
-        }
-
-        invocation.set_args(self.args);
-
-        let mut missing: Vec<String> = invocation
-            .unspecified_params()
-            .map(|(key, _)| key.clone())
-            .collect();
-
-        if !missing.is_empty() {
-            missing.sort();
-            return Err(Error::MissingParams(missing));
-        }
-
-        let resolve_params = invocation.into_resolve_request()?;
-        let envelope = self.trp.resolve(resolve_params).await?;
-
-        let signers = self
-            .parties
+        let signers = parties
             .iter()
             .filter_map(|(name, party)| party.signer_party(name))
             .collect();
 
         Ok(ResolvedTx {
-            trp: self.trp,
+            trp,
             hash: envelope.hash,
             tx_hex: envelope.tx,
             signers,
@@ -951,5 +1155,79 @@ mod tests {
             .map(|w| w.key.content.as_str())
             .collect();
         assert_eq!(keys, vec!["01", "02", "03"]);
+    }
+
+    fn sample_tir() -> TirEnvelope {
+        TirEnvelope {
+            content: "abcd".to_string(),
+            encoding: crate::core::TirEncoding::Hex,
+            version: "v1beta0".to_string(),
+        }
+    }
+
+    #[test]
+    fn resolve_params_merges_env_parties_and_args() {
+        let mut env = EnvMap::new();
+        env.insert("network".to_string(), serde_json::json!("testnet"));
+
+        let mut parties = HashMap::new();
+        parties.insert("receiver".to_string(), Party::address("addr_receiver"));
+
+        let mut args = ArgMap::new();
+        args.insert("quantity".to_string(), serde_json::json!(10_000_000));
+
+        let params = build_resolve_params(sample_tir(), env, &parties, args);
+
+        assert_eq!(params.env, None);
+        assert_eq!(params.tir.content, "abcd");
+        assert_eq!(params.args.get("network").unwrap(), &serde_json::json!("testnet"));
+        assert_eq!(
+            params.args.get("receiver").unwrap(),
+            &serde_json::json!("addr_receiver")
+        );
+        assert_eq!(
+            params.args.get("quantity").unwrap(),
+            &serde_json::json!(10_000_000)
+        );
+    }
+
+    #[test]
+    fn resolve_params_args_override_env() {
+        let mut env = EnvMap::new();
+        env.insert("quantity".to_string(), serde_json::json!(1));
+
+        let mut args = ArgMap::new();
+        args.insert("quantity".to_string(), serde_json::json!(999));
+
+        let params =
+            build_resolve_params(sample_tir(), env, &HashMap::new(), args);
+
+        assert_eq!(
+            params.args.get("quantity").unwrap(),
+            &serde_json::json!(999)
+        );
+    }
+
+    #[test]
+    fn resolve_params_uses_signer_party_address() {
+        let stub = StubSigner {
+            address: "addr_signer".to_string(),
+            witness: fake_witness("aa", "bb"),
+        };
+
+        let mut parties = HashMap::new();
+        parties.insert("sender".to_string(), Party::signer(stub));
+
+        let params = build_resolve_params(
+            sample_tir(),
+            EnvMap::new(),
+            &parties,
+            ArgMap::new(),
+        );
+
+        assert_eq!(
+            params.args.get("sender").unwrap(),
+            &serde_json::json!("addr_signer")
+        );
     }
 }
