@@ -23,7 +23,7 @@ Or in `Cargo.toml`:
 
 ```toml
 [dependencies]
-tx3-sdk = "0.11"
+tx3-sdk = "0.12"
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 ```
@@ -67,15 +67,23 @@ async fn main() -> Result<(), tx3_sdk::Error> {
 }
 ```
 
+All fallible validation — TRP endpoint present, profile declared, every bound
+party declared — happens inside `build()`, which returns `Error::MissingTrpEndpoint`,
+`Error::UnknownProfile`, or `Error::UnknownParty`. Optional setters never return
+`Result`, so chains stay fluent up to `build()`. Profile selection is
+**builder-only**: there is no profile-switching method on the built client.
+Switching profiles requires a new builder.
+
 ## Concepts
 
 | SDK Type | Glossary Term | Description |
 |---|---|---|
-| `tii::Protocol` | TII / Protocol | Loaded `.tii` exposing transactions, parties, profiles |
-| `Tx3ClientBuilder` | Client builder | Fluent builder obtained via `Protocol::client()`; validates on `build()` |
-| `Tx3Client` | Facade | Entry point holding protocol, TRP client, and party bindings |
-| `TxBuilder` | Invocation builder | Collects args, resolves via TRP |
+| `tii::Protocol` | TII / Protocol | Loaded `.tii` exposing transactions, parties, profiles. `Protocol::client()` returns a fresh `Tx3ClientBuilder` |
+| `Tx3ClientBuilder` | Client builder | Fluent builder seeded by `Protocol::client()` or `Tx3ClientBuilder::from_parts(...)`; absorbs all fallible validation in `build()` |
+| `Tx3Client` | Facade | Output of `Tx3ClientBuilder::build()` — owns the deconstructed protocol parts, TRP client, profile, and party bindings |
+| `TxBuilder` | Invocation builder | Source-agnostic; collects args, resolves via TRP |
 | `Party` | Party | `Party::address(...)` (read-only) or `Party::signer(...)` (signing) |
+| `Profile` | Profile | `{ environment, parties }` value baked into the client; embedded by codegen plugins, decomposed from `Protocol` by `from_protocol` |
 | `Signer` | Signer | Trait producing a `TxWitness` for a `SignRequest` |
 | `SignRequest` | SignRequest | Input passed to `Signer::sign`: `tx_hash_hex` + `tx_cbor_hex` |
 | `CardanoSigner` | Cardano Signer | BIP32-Ed25519 signer at `m/1852'/1815'/0'/0/0` |
@@ -84,8 +92,60 @@ async fn main() -> Result<(), tx3_sdk::Error> {
 | `SignedTx` | Signed transaction | Output of `sign()`, ready for submission |
 | `SubmittedTx` | Submitted transaction | Output of `submit()`, pollable for status |
 | `PollConfig` | Poll configuration | Controls `wait_for_confirmed` / `wait_for_finalized` polling |
+| `Error::MissingTrpEndpoint` / `UnknownProfile` / `UnknownParty` / `UnknownTx` | Builder errors | Returned by `build()` and `tx(name)`; named variants of the single `tx3_sdk::Error` enum |
 
 ## Advanced usage
+
+### Skipping the runtime `.tii` (codegen flow)
+
+If you've run `trix codegen` to generate typed bindings, your generated `Client`
+embeds the per-transaction TIR envelopes and per-profile data at codegen time —
+no `.tii` artifact at runtime. Under the hood it seeds the same builder via
+`Tx3ClientBuilder::from_parts(transactions, profiles, known_parties)` and routes
+typed per-party setters through `with_party_unchecked`. You can also call
+`from_parts` directly from hand-written code:
+
+```rust
+use std::collections::{HashMap, HashSet};
+use tx3_sdk::{Party, Tx3ClientBuilder};
+
+let tx3 = Tx3ClientBuilder::from_parts(transactions, profiles, HashSet::new())
+    .trp_endpoint("https://trp.example.com")
+    .with_party_unchecked("sender", Party::signer(signer))
+    .build()?;
+```
+
+### Adding TRP headers
+
+`with_header(key, value)` attaches a header to every TRP request. Combine with
+`trp_endpoint` (or `trp(ClientOptions { ... })`) — `with_header` does not supply
+an endpoint on its own.
+
+```rust
+let tx3 = protocol
+    .client()
+    .trp_endpoint("https://trp.example.com")
+    .with_header("dmtr-api-key", api_key)
+    .with_profile("preprod")
+    .with_party("sender", Party::signer(signer))
+    .build()?;
+```
+
+### One-off environment overrides
+
+`with_env_value(key, value)` overlays a single environment value on top of the
+selected profile's environment, merged at resolve time (override wins). Useful
+for adjusting a network selector or other env without forking a new profile.
+
+```rust
+let tx3 = protocol
+    .client()
+    .trp_endpoint("https://trp.example.com")
+    .with_profile("preprod")
+    .with_env_value("tax", json!(2_500_000))
+    .with_party("sender", Party::signer(signer))
+    .build()?;
+```
 
 ### Low-level TRP client
 
