@@ -57,6 +57,10 @@ pub static {{constantCase @key}}_TIR: LazyLock<TirEnvelope> = LazyLock::new(|| T
 });
 {{/each}}
 
+{{#if tii.components.schemas}}
+// Named types for the protocol's custom (record / variant) types.
+{{{componentTypes tii.components.schemas "rust"}}}
+{{/if}}
 {{#each tii.transactions}}
 /// Arguments for the {{@key}} transaction.
 #[derive(Debug, Clone, Serialize)]
