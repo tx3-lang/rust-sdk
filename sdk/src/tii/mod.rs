@@ -64,9 +64,8 @@
 //! for different networks. When invoking a transaction with a profile, those values are
 //! automatically populated.
 
-use schemars::schema::{InstanceType, Schema, SingleOrVec};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
@@ -75,7 +74,10 @@ use crate::{
     tii::spec::{Profile, Transaction},
 };
 
+mod schema;
 pub mod spec;
+
+pub use schema::{ParamMap, ParamType, VariantCase};
 
 /// Error type for TII operations.
 ///
@@ -98,28 +100,6 @@ pub enum Error {
     /// Profile name not found in the protocol.
     #[error("unknown profile: {0}")]
     UnknownProfile(String),
-
-    /// Invalid JSON schema for transaction parameters.
-    #[error("invalid params schema")]
-    InvalidParamsSchema,
-
-    /// Invalid parameter type encountered in schema.
-    #[error("invalid param type")]
-    InvalidParamType,
-}
-
-fn params_from_schema(schema: Schema) -> Result<ParamMap, Error> {
-    let mut params = ParamMap::new();
-
-    let as_object = schema.into_object();
-
-    if let Some(obj_validation) = as_object.object {
-        for (key, value) in obj_validation.properties {
-            params.insert(key, ParamType::from_json_schema(value)?);
-        }
-    }
-
-    Ok(params)
 }
 
 /// A TX3 protocol loaded from a TII file.
@@ -291,15 +271,22 @@ impl Protocol {
             args: ArgMap::new(),
         };
 
+        let components: HashMap<String, Value> = self
+            .spec
+            .components
+            .as_ref()
+            .map(|c| c.schemas.clone())
+            .unwrap_or_default();
+
         for party in self.spec.parties.keys() {
             out.params.insert(party.to_lowercase(), ParamType::Address);
         }
 
         if let Some(env) = &self.spec.environment {
-            out.params.extend(params_from_schema(env.clone())?);
+            out.params.extend(schema::params_from_schema(env, &components));
         }
 
-        out.params.extend(params_from_schema(tx.params.clone())?);
+        out.params.extend(schema::params_from_schema(&tx.params, &components));
 
         if let Some(profile) = profile {
             if let Some(env) = profile.environment.as_object() {
@@ -346,86 +333,10 @@ impl Protocol {
     }
 }
 
-/// Type of a transaction parameter.
-///
-/// This enum represents the various types that transaction parameters can have,
-/// including primitives, complex types, and references to TX3 core types.
-#[derive(Debug, Clone)]
-pub enum ParamType {
-    /// Byte array type (hex-encoded).
-    Bytes,
-    /// Integer type (signed or unsigned).
-    Integer,
-    /// Boolean type.
-    Boolean,
-    /// UTXO reference in format `0x[64hex]#[index]`.
-    UtxoRef,
-    /// Bech32-encoded blockchain address.
-    Address,
-    /// List of another parameter type.
-    List(Box<ParamType>),
-    /// Custom JSON schema type.
-    Custom(Schema),
-}
-
-impl ParamType {
-    fn from_json_type(instance_type: InstanceType) -> Result<ParamType, Error> {
-        match instance_type {
-            InstanceType::Integer => Ok(ParamType::Integer),
-            InstanceType::Boolean => Ok(ParamType::Boolean),
-            _ => Err(Error::InvalidParamType),
-        }
-    }
-
-    /// Creates a parameter type from a JSON schema.
-    ///
-    /// This method interprets a JSON schema and converts it to the appropriate
-    /// `ParamType`. It handles TX3 core type references (Bytes, Address, UtxoRef)
-    /// as well as primitive types.
-    ///
-    /// # Arguments
-    ///
-    /// * `schema` - The JSON schema to convert
-    ///
-    /// # Returns
-    ///
-    /// Returns the corresponding `ParamType` on success.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the schema cannot be mapped to a known parameter type.
-    pub fn from_json_schema(schema: Schema) -> Result<ParamType, Error> {
-        let as_object = schema.into_object();
-
-        if let Some(reference) = &as_object.reference {
-            return match reference.as_str() {
-                "https://tx3.land/specs/v1beta0/core#Bytes" => Ok(ParamType::Bytes),
-                "https://tx3.land/specs/v1beta0/core#Address" => Ok(ParamType::Address),
-                "https://tx3.land/specs/v1beta0/core#UtxoRef" => Ok(ParamType::UtxoRef),
-                _ => Err(Error::InvalidParamType),
-            };
-        }
-
-        if let Some(inner) = as_object.instance_type {
-            return match inner {
-                SingleOrVec::Single(x) => Self::from_json_type(*x),
-                SingleOrVec::Vec(_) => Err(Error::InvalidParamType),
-            };
-        }
-
-        Err(Error::InvalidParamType)
-    }
-}
-
 /// Input query specification.
 ///
 /// This type is currently a placeholder for future input query functionality.
 pub struct InputQuery {}
-
-/// Map of parameter names to their types.
-///
-/// Used to represent the complete set of parameters required for a transaction.
-pub type ParamMap = HashMap<String, ParamType>;
 
 /// Map of input queries.
 ///
@@ -620,4 +531,44 @@ mod tests {
 
         dbg!(&tx);
     }
+
+    #[test]
+    fn invoke_interprets_complex_param_types() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let tii = format!("{manifest_dir}/tests/fixtures/complex.tii");
+
+        let protocol = Protocol::from_file(&tii).unwrap();
+        let mut invoke = protocol.invoke("complex", None).unwrap();
+        let params = invoke.params();
+
+        // Primitives, unit, and core `$ref`s.
+        assert!(matches!(params["quantity"], ParamType::Integer));
+        assert!(matches!(params["flag"], ParamType::Boolean));
+        assert!(matches!(params["nothing"], ParamType::Unit));
+        assert!(matches!(params["recipient"], ParamType::Address));
+        assert!(matches!(params["source"], ParamType::UtxoRef));
+        assert!(matches!(params["bag"], ParamType::AnyAsset));
+
+        // Parties become addresses.
+        assert!(matches!(params["sender"], ParamType::Address));
+        assert!(matches!(params["receiver"], ParamType::Address));
+
+        // Compound kinds.
+        assert!(matches!(params["amounts"], ParamType::List(_)));
+        assert!(matches!(params["pair"], ParamType::Tuple(_)));
+        assert!(matches!(params["labels"], ParamType::Map(_)));
+
+        // `#/components/schemas/<Name>` refs resolve against the components table:
+        // a record (AssetClass) and a variant (Side). This exercises the
+        // `components` threading through `Protocol::invoke`.
+        match &params["asset"] {
+            ParamType::Record(fields) => assert!(matches!(fields["policy"], ParamType::Bytes)),
+            other => panic!("expected asset record, got {other:?}"),
+        }
+        match &params["side"] {
+            ParamType::Variant(cases) => assert!(!cases.is_empty()),
+            other => panic!("expected side variant, got {other:?}"),
+        }
+    }
 }
+
