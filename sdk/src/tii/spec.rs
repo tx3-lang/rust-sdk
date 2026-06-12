@@ -1,5 +1,5 @@
-use schemars::schema::Schema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::core::TirEnvelope;
@@ -18,7 +18,7 @@ pub struct TiiFile {
 
     /// Optional JSON schema for environment parameters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment: Option<Schema>,
+    pub environment: Option<Value>,
 
     /// Map of party names to their definitions.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -75,7 +75,7 @@ pub struct Transaction {
     pub tir: TirEnvelope,
 
     /// JSON schema defining the transaction parameters.
-    pub params: Schema,
+    pub params: Value,
 
     /// Optional transaction description.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -119,5 +119,5 @@ pub struct Profile {
 pub struct Components {
     /// Map of reusable JSON schemas.
     #[serde(skip_serializing_if = "HashMap::is_empty")]
-    pub schemas: HashMap<String, Schema>,
+    pub schemas: HashMap<String, Value>,
 }
