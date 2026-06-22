@@ -7,7 +7,7 @@
 //! fails: any shape it does not recognize becomes [`ParamType::Unknown`].
 
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 /// Map of parameter names to their types.
 ///
@@ -60,8 +60,11 @@ pub enum ParamType {
     Tuple(Vec<ParamType>),
     /// String-keyed homogeneous map (`object` + `additionalProperties`).
     Map(Box<ParamType>),
-    /// User-defined record (`object` + `properties`), field name → type.
-    Record(BTreeMap<String, ParamType>),
+    /// User-defined record (`object` + `properties`), `(field name, type)` in
+    /// **declared order** (the schema's `required` array, which `tx3c` emits in
+    /// source order — `properties` is alphabetized and must not drive field
+    /// order). Encoding maps the user's by-name object to positional fields.
+    Record(Vec<(String, ParamType)>),
     /// User-defined tagged union (`oneOf`), externally tagged.
     Variant(Vec<VariantCase>),
     /// A schema shape that could not be interpreted; carries the raw schema.
@@ -78,6 +81,17 @@ pub struct VariantCase {
 }
 
 impl ParamType {
+    /// Looks up a field type by name in a [`ParamType::Record`]; `None` for any
+    /// other kind or an absent field.
+    pub fn field(&self, name: &str) -> Option<&ParamType> {
+        match self {
+            ParamType::Record(fields) => {
+                fields.iter().find(|(k, _)| k == name).map(|(_, ty)| ty)
+            }
+            _ => None,
+        }
+    }
+
     /// Maps a built-in core `$ref` to its kind by trailing name, so both the
     /// canonical `…/tii#/$defs/<Name>` and legacy `…/core#<Name>` forms resolve.
     fn core_ref_type(reference: &str) -> Option<ParamType> {
@@ -162,15 +176,38 @@ impl ParamType {
         if let Some(value) = schema.get("additionalProperties").filter(|v| v.is_object()) {
             ParamType::Map(Box::new(Self::from_json_schema(value, components)))
         } else if let Some(props) = schema.get("properties").and_then(Value::as_object) {
-            ParamType::Record(
-                props
-                    .iter()
-                    .map(|(k, v)| (k.clone(), Self::from_json_schema(v, components)))
-                    .collect(),
-            )
+            ParamType::Record(Self::record_fields(schema, props, components))
         } else {
             ParamType::Unknown(schema.clone())
         }
+    }
+
+    /// Builds record fields in declared order: the `required` array first (source
+    /// order, as `tx3c` emits), then any remaining (alphabetized) `properties`.
+    fn record_fields(
+        schema: &Value,
+        props: &serde_json::Map<String, Value>,
+        components: &HashMap<String, Value>,
+    ) -> Vec<(String, ParamType)> {
+        let mut fields = Vec::with_capacity(props.len());
+        let mut seen = std::collections::HashSet::new();
+
+        if let Some(required) = schema.get("required").and_then(Value::as_array) {
+            for name in required.iter().filter_map(Value::as_str) {
+                if let Some(field_schema) = props.get(name) {
+                    fields.push((name.to_string(), Self::from_json_schema(field_schema, components)));
+                    seen.insert(name.to_string());
+                }
+            }
+        }
+
+        for (k, v) in props {
+            if !seen.contains(k) {
+                fields.push((k.clone(), Self::from_json_schema(v, components)));
+            }
+        }
+
+        fields
     }
 
     /// Creates a parameter type from a JSON schema node.
@@ -308,9 +345,9 @@ mod tests {
             "required": ["price", "live"]
         });
         match pt(schema) {
-            ParamType::Record(fields) => {
-                assert!(matches!(fields["price"], ParamType::Integer));
-                assert!(matches!(fields["live"], ParamType::Boolean));
+            rec @ ParamType::Record(_) => {
+                assert!(matches!(rec.field("price"), Some(ParamType::Integer)));
+                assert!(matches!(rec.field("live"), Some(ParamType::Boolean)));
             }
             other => panic!("expected record, got {other:?}"),
         }
@@ -331,12 +368,12 @@ mod tests {
                 assert_eq!(cases.len(), 2);
                 assert_eq!(cases[0].tag, "Buy");
                 assert_eq!(cases[1].tag, "Sell");
-                match &*cases[1].fields {
-                    ParamType::Record(fields) => {
-                        assert!(matches!(fields["price"], ParamType::Integer))
-                    }
-                    other => panic!("expected record fields, got {other:?}"),
-                }
+                let sell_fields = &*cases[1].fields;
+                assert!(matches!(sell_fields, ParamType::Record(_)));
+                assert!(matches!(
+                    sell_fields.field("price"),
+                    Some(ParamType::Integer)
+                ));
             }
             other => panic!("expected variant, got {other:?}"),
         }
@@ -355,7 +392,7 @@ mod tests {
         );
         let schema = json!({"$ref": "#/components/schemas/AssetClass"});
         match ParamType::from_json_schema(&schema, &components) {
-            ParamType::Record(fields) => assert!(matches!(fields["policy"], ParamType::Bytes)),
+            rec @ ParamType::Record(_) => assert!(matches!(rec.field("policy"), Some(ParamType::Bytes))),
             other => panic!("expected record, got {other:?}"),
         }
         // Missing component → Unknown, never panics.
