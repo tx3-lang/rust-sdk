@@ -74,9 +74,11 @@ use crate::{
     tii::spec::{Profile, Transaction},
 };
 
+pub mod encode;
 mod schema;
 pub mod spec;
 
+pub use encode::{encode, EncodeError};
 pub use schema::{ParamMap, ParamType, VariantCase};
 
 /// Error type for TII operations.
@@ -100,6 +102,10 @@ pub enum Error {
     /// Profile name not found in the protocol.
     #[error("unknown profile: {0}")]
     UnknownProfile(String),
+
+    /// A complex argument value did not match its declared parameter type.
+    #[error("failed to encode argument: {0}")]
+    EncodeArg(#[from] EncodeError),
 }
 
 /// A TX3 protocol loaded from a TII file.
@@ -476,7 +482,23 @@ impl Invocation {
     /// Currently this method always succeeds, but returns `Result` for future
     /// compatibility.
     pub fn into_resolve_request(self) -> Result<crate::trp::ResolveParams, Error> {
-        let args = self.args.clone().into_iter().collect();
+        // Every arg is marshalled by its `.tii` `ParamType`: top-level scalars
+        // come back bare, aggregates tagged. An unmapped arg has no type, so it
+        // passes through untouched. Arg keys are lowercased on set while params
+        // keep their original case, so match case-insensitively.
+        let args = self
+            .args
+            .clone()
+            .into_iter()
+            .map(|(key, value)| match self
+                .params
+                .iter()
+                .find(|(name, _)| name.to_lowercase() == key)
+            {
+                Some((_, ty)) => Ok((key, encode::encode(ty, &value)?)),
+                None => Ok((key, value)),
+            })
+            .collect::<Result<_, Error>>()?;
 
         let tir = self.tir.clone();
 
@@ -562,13 +584,57 @@ mod tests {
         // a record (AssetClass) and a variant (Side). This exercises the
         // `components` threading through `Protocol::invoke`.
         match &params["asset"] {
-            ParamType::Record(fields) => assert!(matches!(fields["policy"], ParamType::Bytes)),
+            rec @ ParamType::Record(_) => assert!(matches!(rec.field("policy"), Some(ParamType::Bytes))),
             other => panic!("expected asset record, got {other:?}"),
         }
         match &params["side"] {
             ParamType::Variant(cases) => assert!(!cases.is_empty()),
             other => panic!("expected side variant, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn invoke_encodes_aggregate_arg_into_wire_form() {
+        // End-to-end through the path `cshell`/`trix invoke` take (`set_args` →
+        // `into_resolve_request`) on a real TII: the `meta` record serializes to
+        // the tagged form while scalars stay bare.
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let tii = format!("{manifest_dir}/tests/fixtures/invoke.tii");
+
+        let protocol = Protocol::from_file(&tii).unwrap();
+        let invoke = protocol.invoke("transfer", None).unwrap().with_args(
+            serde_json::from_value(json!({
+                "sender": "addr_test1vqx…",
+                "receiver": "addr_test1vqyy…",
+                "quantity": 2_000_000,
+                "urgent": true,
+                "memo": "deadbeef",
+                "meta": { "tags": [1, 2, 3], "level": 7 }
+            }))
+            .unwrap(),
+        );
+
+        let request = invoke.into_resolve_request().unwrap();
+
+        // Fields are positional in declared order (tags, level) — `required`
+        // order, not alphabetical.
+        assert_eq!(
+            request.args["meta"],
+            json!({
+                "struct": {
+                    "constructor": 0,
+                    "fields": [
+                        { "list": [{ "int": 1 }, { "int": 2 }, { "int": 3 }] },
+                        { "int": 7 }
+                    ]
+                }
+            })
+        );
+
+        // Scalars stay bare; the resolver coerces them via the flat type.
+        assert_eq!(request.args["quantity"], json!(2_000_000));
+        assert_eq!(request.args["urgent"], json!(true));
+        assert_eq!(request.args["memo"], json!("deadbeef"));
     }
 }
 
