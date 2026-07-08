@@ -85,9 +85,7 @@ impl ParamType {
     /// other kind or an absent field.
     pub fn field(&self, name: &str) -> Option<&ParamType> {
         match self {
-            ParamType::Record(fields) => {
-                fields.iter().find(|(k, _)| k == name).map(|(_, ty)| ty)
-            }
+            ParamType::Record(fields) => fields.iter().find(|(k, _)| k == name).map(|(_, ty)| ty),
             _ => None,
         }
     }
@@ -195,7 +193,10 @@ impl ParamType {
         if let Some(required) = schema.get("required").and_then(Value::as_array) {
             for name in required.iter().filter_map(Value::as_str) {
                 if let Some(field_schema) = props.get(name) {
-                    fields.push((name.to_string(), Self::from_json_schema(field_schema, components)));
+                    fields.push((
+                        name.to_string(),
+                        Self::from_json_schema(field_schema, components),
+                    ));
                     seen.insert(name.to_string());
                 }
             }
@@ -277,7 +278,10 @@ mod tests {
                     format!("{prefix}/{name}")
                 }
             };
-            assert!(matches!(pt(json!({"$ref": join("Bytes")})), ParamType::Bytes));
+            assert!(matches!(
+                pt(json!({"$ref": join("Bytes")})),
+                ParamType::Bytes
+            ));
             assert!(matches!(
                 pt(json!({"$ref": join("Address")})),
                 ParamType::Address
@@ -300,7 +304,8 @@ mod tests {
             ParamType::List(inner) => assert!(matches!(*inner, ParamType::Integer)),
             other => panic!("expected list, got {other:?}"),
         }
-        match pt(json!({"type": "array", "items": {"type": "array", "items": {"type": "boolean"}}})) {
+        match pt(json!({"type": "array", "items": {"type": "array", "items": {"type": "boolean"}}}))
+        {
             ParamType::List(inner) => match *inner {
                 ParamType::List(deep) => assert!(matches!(*deep, ParamType::Boolean)),
                 other => panic!("expected list(list), got {other:?}"),
@@ -392,7 +397,9 @@ mod tests {
         );
         let schema = json!({"$ref": "#/components/schemas/AssetClass"});
         match ParamType::from_json_schema(&schema, &components) {
-            rec @ ParamType::Record(_) => assert!(matches!(rec.field("policy"), Some(ParamType::Bytes))),
+            rec @ ParamType::Record(_) => {
+                assert!(matches!(rec.field("policy"), Some(ParamType::Bytes)))
+            }
             other => panic!("expected record, got {other:?}"),
         }
         // Missing component → Unknown, never panics.
@@ -405,7 +412,10 @@ mod tests {
 
     #[test]
     fn unrecognized_shapes_fall_back_to_unknown() {
-        assert!(matches!(pt(json!({"type": "string"})), ParamType::Unknown(_)));
+        assert!(matches!(
+            pt(json!({"type": "string"})),
+            ParamType::Unknown(_)
+        ));
         assert!(matches!(pt(json!({})), ParamType::Unknown(_)));
         assert!(matches!(pt(json!("nonsense")), ParamType::Unknown(_)));
         assert!(matches!(

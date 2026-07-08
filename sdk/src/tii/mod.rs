@@ -289,10 +289,12 @@ impl Protocol {
         }
 
         if let Some(env) = &self.spec.environment {
-            out.params.extend(schema::params_from_schema(env, &components));
+            out.params
+                .extend(schema::params_from_schema(env, &components));
         }
 
-        out.params.extend(schema::params_from_schema(&tx.params, &components));
+        out.params
+            .extend(schema::params_from_schema(&tx.params, &components));
 
         if let Some(profile) = profile {
             if let Some(env) = profile.environment.as_object() {
@@ -490,13 +492,15 @@ impl Invocation {
             .args
             .clone()
             .into_iter()
-            .map(|(key, value)| match self
-                .params
-                .iter()
-                .find(|(name, _)| name.to_lowercase() == key)
-            {
-                Some((_, ty)) => Ok((key, encode::encode(ty, &value)?)),
-                None => Ok((key, value)),
+            .map(|(key, value)| {
+                match self
+                    .params
+                    .iter()
+                    .find(|(name, _)| name.to_lowercase() == key)
+                {
+                    Some((_, ty)) => Ok((key, encode::encode(ty, &value)?)),
+                    None => Ok((key, value)),
+                }
             })
             .collect::<Result<_, Error>>()?;
 
@@ -584,7 +588,9 @@ mod tests {
         // a record (AssetClass) and a variant (Side). This exercises the
         // `components` threading through `Protocol::invoke`.
         match &params["asset"] {
-            rec @ ParamType::Record(_) => assert!(matches!(rec.field("policy"), Some(ParamType::Bytes))),
+            rec @ ParamType::Record(_) => {
+                assert!(matches!(rec.field("policy"), Some(ParamType::Bytes)))
+            }
             other => panic!("expected asset record, got {other:?}"),
         }
         match &params["side"] {
@@ -637,4 +643,3 @@ mod tests {
         assert_eq!(request.args["memo"], json!("deadbeef"));
     }
 }
-
