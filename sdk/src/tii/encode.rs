@@ -86,7 +86,11 @@ fn marshal(param: &ParamType, value: &Value, nested: bool) -> Result<Value, Enco
     match param {
         ParamType::Integer => match value {
             Value::Number(_) | Value::String(_) => Ok(leaf("int", value, nested)),
-            other => Err(wrong_shape("integer", "number or decimal/hex string", other)),
+            other => Err(wrong_shape(
+                "integer",
+                "number or decimal/hex string",
+                other,
+            )),
         },
         ParamType::Boolean => match value {
             // Same lenient forms the resolver coerces: bool, 0/1, "true"/"false".
@@ -148,7 +152,12 @@ fn marshal(param: &ParamType, value: &Value, nested: bool) -> Result<Value, Enco
             keys.sort();
             let pairs = keys
                 .into_iter()
-                .map(|k| Ok(json!([json!({ "string": k }), marshal(value_type, &obj[k], true)?])))
+                .map(|k| {
+                    Ok(json!([
+                        json!({ "string": k }),
+                        marshal(value_type, &obj[k], true)?
+                    ]))
+                })
                 .collect::<Result<Vec<_>, EncodeError>>()?;
             Ok(json!({ "map": pairs }))
         }
@@ -255,7 +264,9 @@ mod tests {
         let candidates = [
             format!("{manifest}/tests/fixtures/wire-vectors.json"),
             format!("{manifest}/../../sdk-spec/test-vectors/complex-types/wire-vectors.json"),
-            format!("{manifest}/../../../sdks/sdk-spec/test-vectors/complex-types/wire-vectors.json"),
+            format!(
+                "{manifest}/../../../sdks/sdk-spec/test-vectors/complex-types/wire-vectors.json"
+            ),
         ];
         for path in candidates {
             if let Ok(contents) = std::fs::read_to_string(&path) {

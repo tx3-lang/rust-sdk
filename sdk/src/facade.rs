@@ -250,11 +250,7 @@ impl Tx3Client {
     ///
     /// Returns [`Error::UnknownParty`] if `name` is not a party declared by
     /// the protocol.
-    pub fn with_party(
-        mut self,
-        name: impl Into<String>,
-        party: Party,
-    ) -> Result<Self, Error> {
+    pub fn with_party(mut self, name: impl Into<String>, party: Party) -> Result<Self, Error> {
         let name = name.into().to_lowercase();
         if !self.known_parties.contains(&name) {
             return Err(Error::UnknownParty(name));
@@ -267,13 +263,8 @@ impl Tx3Client {
     /// declared parties. Intended for codegen-generated wrappers — see
     /// [`Tx3ClientBuilder::with_party_unchecked`]. Hand-written code SHOULD
     /// use [`Tx3Client::with_party`].
-    pub fn with_party_unchecked(
-        mut self,
-        name: impl Into<String>,
-        party: Party,
-    ) -> Self {
-        self.bound_parties
-            .insert(name.into().to_lowercase(), party);
+    pub fn with_party_unchecked(mut self, name: impl Into<String>, party: Party) -> Self {
+        self.bound_parties.insert(name.into().to_lowercase(), party);
         self
     }
 
@@ -404,8 +395,7 @@ impl Tx3ClientBuilder {
             .profiles()
             .iter()
             .map(|(name, profile)| {
-                let environment =
-                    profile.environment.as_object().cloned().unwrap_or_default();
+                let environment = profile.environment.as_object().cloned().unwrap_or_default();
                 (
                     name.clone(),
                     Profile {
@@ -492,11 +482,7 @@ impl Tx3ClientBuilder {
 
     /// Sets a single environment value. Merged on top of the selected
     /// profile's environment at resolve time (override wins).
-    pub fn with_env_value(
-        mut self,
-        key: impl Into<String>,
-        value: impl Into<Value>,
-    ) -> Self {
+    pub fn with_env_value(mut self, key: impl Into<String>, value: impl Into<Value>) -> Self {
         self.env_overrides.insert(key.into(), value.into());
         self
     }
@@ -718,10 +704,7 @@ impl ResolvedTx {
         };
 
         for signer_party in &self.signers {
-            let witness = signer_party
-                .signer
-                .sign(&request)
-                .map_err(Error::Signer)?;
+            let witness = signer_party.signer.sign(&request).map_err(Error::Signer)?;
             witnesses_info.push(WitnessInfo {
                 party: signer_party.name.clone(),
                 address: signer_party.address.clone(),
@@ -1338,7 +1321,10 @@ mod tests {
 
         assert_eq!(params.env, None);
         assert_eq!(params.tir.content, "abcd");
-        assert_eq!(params.args.get("network").unwrap(), &serde_json::json!("testnet"));
+        assert_eq!(
+            params.args.get("network").unwrap(),
+            &serde_json::json!("testnet")
+        );
         assert_eq!(
             params.args.get("receiver").unwrap(),
             &serde_json::json!("addr_receiver")
@@ -1357,8 +1343,7 @@ mod tests {
         let mut args = ArgMap::new();
         args.insert("quantity".to_string(), serde_json::json!(999));
 
-        let params =
-            build_resolve_params(sample_tir(), env, &HashMap::new(), args);
+        let params = build_resolve_params(sample_tir(), env, &HashMap::new(), args);
 
         assert_eq!(
             params.args.get("quantity").unwrap(),
@@ -1376,12 +1361,7 @@ mod tests {
         let mut parties = HashMap::new();
         parties.insert("sender".to_string(), Party::signer(stub));
 
-        let params = build_resolve_params(
-            sample_tir(),
-            EnvMap::new(),
-            &parties,
-            ArgMap::new(),
-        );
+        let params = build_resolve_params(sample_tir(), EnvMap::new(), &parties, ArgMap::new());
 
         assert_eq!(
             params.args.get("sender").unwrap(),
