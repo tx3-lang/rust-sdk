@@ -99,7 +99,21 @@ fn marshal(param: &ParamType, value: &Value, nested: bool) -> Result<Value, Enco
         },
         ParamType::Bytes => match value {
             Value::String(_) | Value::Object(_) => Ok(leaf("bytes", value, nested)),
-            other => Err(wrong_shape("bytes", "hex string or bytes envelope", other)),
+            // A native byte array (e.g. a codegen `Vec<u8>` param) serializes to
+            // a JSON array of integers; canonicalize it to 0x-prefixed hex, the
+            // wire form the resolver coerces (SDK spec §3.9).
+            Value::Array(items) => {
+                let bytes = byte_array(items).ok_or_else(|| {
+                    wrong_shape("bytes", "hex string, bytes envelope, or byte array", value)
+                })?;
+                let hex = Value::String(format!("0x{}", hex::encode(bytes)));
+                Ok(leaf("bytes", &hex, nested))
+            }
+            other => Err(wrong_shape(
+                "bytes",
+                "hex string, bytes envelope, or byte array",
+                other,
+            )),
         },
         ParamType::Address => match value {
             Value::String(_) => Ok(leaf("address", value, nested)),
@@ -174,6 +188,15 @@ fn marshal(param: &ParamType, value: &Value, nested: bool) -> Result<Value, Enco
         // through and let the resolver coerce it via the flat type.
         ParamType::Utxo | ParamType::AnyAsset | ParamType::Unknown(_) => Ok(value.clone()),
     }
+}
+
+/// Interprets a JSON array as raw bytes: every element must be an integer in
+/// `0..=255`. `None` if any element is not.
+fn byte_array(items: &[Value]) -> Option<Vec<u8>> {
+    items
+        .iter()
+        .map(|v| v.as_u64().filter(|b| *b <= u8::MAX as u64).map(|b| b as u8))
+        .collect()
 }
 
 /// Renders a scalar leaf: bare at the top level (the resolver knows the param's
@@ -362,6 +385,92 @@ mod tests {
         assert_eq!(
             encode(&list, &json!([5])).unwrap(),
             json!({ "list": [{ "int": 5 }] })
+        );
+    }
+
+    fn bytes_schema() -> Value {
+        json!({ "$ref": "https://tx3.land/specs/v1beta0/tii#/$defs/Bytes" })
+    }
+
+    fn list_of_bytes_schema() -> Value {
+        json!({ "type": "array", "items": bytes_schema() })
+    }
+
+    #[test]
+    fn native_byte_arrays_canonicalize_to_hex() {
+        // A codegen `Vec<u8>` param serializes to a JSON array of integers; the
+        // encoder must canonicalize it to 0x-prefixed hex, not send it raw
+        // (regression: TRP `(-32005) value is not bytes: [1,1]`).
+        let bytes = param_type(&bytes_schema(), &HashMap::new());
+        assert_eq!(
+            encode(&bytes, &json!([1, 1])).unwrap(),
+            json!("0x0101"),
+            "top-level byte array renders bare canonical hex"
+        );
+
+        let list = param_type(&list_of_bytes_schema(), &HashMap::new());
+        assert_eq!(
+            encode(&list, &json!([[1, 2]])).unwrap(),
+            json!({ "list": [{ "bytes": "0x0102" }] }),
+            "nested byte array renders tagged canonical hex"
+        );
+    }
+
+    #[test]
+    fn rejects_non_byte_arrays_for_bytes() {
+        let bytes = param_type(&bytes_schema(), &HashMap::new());
+        assert!(encode(&bytes, &json!([1, 256])).is_err());
+        assert!(encode(&bytes, &json!([1, -1])).is_err());
+        assert!(encode(&bytes, &json!(["aa", 1])).is_err());
+        assert!(encode(&bytes, &json!(true)).is_err());
+    }
+
+    #[test]
+    fn hydra_init_arg_shapes() {
+        // Hydra `init` from the feedback repro: `participants` / `parties` are
+        // `List<Bytes>`, `head_id` is `Bytes`. Both hex-string and native
+        // byte-array element forms must produce a CBOR-decodable list of
+        // byte-strings, never a bare byte-string and never raw arrays
+        // (regression: `(-32005) target type not supported: List` /
+        // `value is not bytes: [1,2]`).
+        let list = param_type(&list_of_bytes_schema(), &HashMap::new());
+
+        // participants as hex strings
+        assert_eq!(
+            encode(&list, &json!(["0102", "0304"])).unwrap(),
+            json!({ "list": [{ "bytes": "0102" }, { "bytes": "0304" }] })
+        );
+        // participants as native byte arrays (`vec![vec![1, 2]]`)
+        assert_eq!(
+            encode(&list, &json!([[1, 2]])).unwrap(),
+            json!({ "list": [{ "bytes": "0x0102" }] })
+        );
+        // parties: same List<Bytes> shape, verifier-key bytes
+        assert_eq!(
+            encode(&list, &json!([[222, 173, 190, 239]])).unwrap(),
+            json!({ "list": [{ "bytes": "0xdeadbeef" }] })
+        );
+        // head_id: scalar Bytes stays bare at the top level
+        let bytes = param_type(&bytes_schema(), &HashMap::new());
+        assert_eq!(
+            encode(&bytes, &json!("abcd0123")).unwrap(),
+            json!("abcd0123")
+        );
+    }
+
+    #[test]
+    fn asteria_name_arg_shapes() {
+        // Asteria `create_ship`: `ship_name` / `pilot_name` are `Bytes` params.
+        // Hex-string input passes through bare; native byte arrays canonicalize
+        // (regression: `(-32005) value is not bytes: [1,1]`).
+        let bytes = param_type(&bytes_schema(), &HashMap::new());
+        assert_eq!(
+            encode(&bytes, &json!("53484950313233")).unwrap(),
+            json!("53484950313233")
+        );
+        assert_eq!(
+            encode(&bytes, &json!([83, 72, 73, 80])).unwrap(),
+            json!("0x53484950")
         );
     }
 }
