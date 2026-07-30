@@ -18,7 +18,11 @@ pub type ParamMap = HashMap<String, ParamType>;
 /// unrecognized property schemas yield [`ParamType::Unknown`]. `components` is the
 /// TII's `components.schemas` table, used to resolve `#/components/schemas/<Name>`
 /// refs to user-defined record / variant types.
-pub(super) fn params_from_schema(schema: &Value, components: &HashMap<String, Value>) -> ParamMap {
+///
+/// Public so codegen-generated clients can interpret their embedded params
+/// schemas and hand the resulting [`ParamMap`] to
+/// [`crate::Tx3ClientBuilder::with_tx_params`].
+pub fn params_from_schema(schema: &Value, components: &HashMap<String, Value>) -> ParamMap {
     let mut params = ParamMap::new();
 
     if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
