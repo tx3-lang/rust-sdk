@@ -12,7 +12,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::core::{ArgMap, BytesEnvelope, EnvMap, TirEnvelope};
-use crate::tii::Protocol;
+use crate::tii::{self, ParamMap, Protocol};
 use crate::trp::{self, ResolveParams, SubmitParams, TxStage, TxStatus, TxWitness};
 
 #[derive(Clone)]
@@ -206,6 +206,7 @@ pub struct Profile {
 #[derive(Clone)]
 pub struct Tx3Client {
     transactions: HashMap<String, TirEnvelope>,
+    tx_params: HashMap<String, ParamMap>,
     known_parties: HashSet<String>,
     trp: trp::Client,
     bound_parties: HashMap<String, Party>,
@@ -218,8 +219,10 @@ impl Tx3Client {
     ///
     /// Crate-internal entry used by [`Tx3ClientBuilder::build`]. External
     /// callers go through the builder.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_parts(
         transactions: HashMap<String, TirEnvelope>,
+        tx_params: HashMap<String, ParamMap>,
         known_parties: HashSet<String>,
         trp: trp::Client,
         bound_parties: HashMap<String, Party>,
@@ -232,6 +235,7 @@ impl Tx3Client {
             .collect();
         Self {
             transactions,
+            tx_params,
             known_parties,
             trp,
             bound_parties,
@@ -292,9 +296,12 @@ impl Tx3Client {
             .transactions
             .get(&name)
             .cloned()
-            .ok_or(Error::UnknownTx(name))?;
+            .ok_or_else(|| Error::UnknownTx(name.clone()))?;
+
+        let params = self.tx_params.get(&name).cloned().unwrap_or_default();
 
         Ok(TxBuilder::new(tir, self.trp.clone())
+            .params(params)
             .env(self.env())
             .parties(self.merged_parties()))
     }
@@ -347,6 +354,7 @@ impl Tx3Client {
 /// ```
 pub struct Tx3ClientBuilder {
     transactions: HashMap<String, TirEnvelope>,
+    tx_params: HashMap<String, ParamMap>,
     profiles: HashMap<String, Profile>,
     known_parties: HashSet<String>,
     trp_options: Option<trp::ClientOptions>,
@@ -374,6 +382,7 @@ impl Tx3ClientBuilder {
             .collect();
         Self {
             transactions,
+            tx_params: HashMap::new(),
             profiles,
             known_parties,
             trp_options: None,
@@ -389,6 +398,17 @@ impl Tx3ClientBuilder {
             .txs()
             .iter()
             .map(|(name, tx)| (name.clone(), tx.tir.clone()))
+            .collect();
+
+        let tx_params = protocol
+            .txs()
+            .keys()
+            .filter_map(|name| {
+                protocol
+                    .tx_params(name)
+                    .ok()
+                    .map(|params| (name.clone(), params))
+            })
             .collect();
 
         let profiles = protocol
@@ -408,7 +428,9 @@ impl Tx3ClientBuilder {
 
         let known_parties = protocol.parties().keys().cloned().collect();
 
-        Self::from_parts(transactions, profiles, known_parties)
+        let mut builder = Self::from_parts(transactions, profiles, known_parties);
+        builder.tx_params = tx_params;
+        builder
     }
 
     /// Sets the full TRP client options.
@@ -438,6 +460,20 @@ impl Tx3ClientBuilder {
         opts.headers
             .get_or_insert_with(HashMap::new)
             .insert(key.into(), value.into());
+        self
+    }
+
+    /// Attaches the parameter-type map for a transaction, enabling
+    /// type-directed argument encoding into the TRP `TaggedArg` wire form at
+    /// resolve time (see [`crate::tii::encode`]).
+    ///
+    /// [`Protocol::client`] populates this automatically for every declared
+    /// transaction. Codegen-generated bindings call it with a map built from
+    /// their embedded params schema via [`crate::tii::params_from_schema`]. A
+    /// transaction without a map sends its arguments unencoded, leaving
+    /// coercion to the resolver.
+    pub fn with_tx_params(mut self, tx: impl Into<String>, params: ParamMap) -> Self {
+        self.tx_params.insert(tx.into(), params);
         self
     }
 
@@ -525,6 +561,7 @@ impl Tx3ClientBuilder {
 
         Ok(Tx3Client::from_parts(
             self.transactions,
+            self.tx_params,
             self.known_parties,
             trp,
             bound_parties,
@@ -540,12 +577,20 @@ impl Tx3ClientBuilder {
 /// folded in), bound party addresses, and caller-supplied `args` are merged
 /// into a single argument map, in increasing order of precedence. The request
 /// `env` is left unset — TRP receives one argument map.
+///
+/// Every merged value whose name matches a `params` entry is marshalled by its
+/// `.tii` [`crate::tii::ParamType`] into the TRP `TaggedArg` wire form
+/// (top-level scalars bare, aggregates tagged — see [`crate::tii::encode`]).
+/// An unmapped value has no type, so it passes through untouched. Merged keys
+/// are lowercased on insert while params keep their original case, so the
+/// match is case-insensitive.
 fn build_resolve_params(
     tir: TirEnvelope,
     env: EnvMap,
     parties: &HashMap<String, Party>,
     args: ArgMap,
-) -> ResolveParams {
+    params: &ParamMap,
+) -> Result<ResolveParams, Error> {
     let mut merged = ArgMap::new();
     merged.extend(env);
     for (name, party) in parties {
@@ -556,11 +601,27 @@ fn build_resolve_params(
     }
     merged.extend(args);
 
-    ResolveParams {
+    let encoded = merged
+        .into_iter()
+        .map(|(key, value)| {
+            match params
+                .iter()
+                .find(|(name, _)| name.to_lowercase() == key.to_lowercase())
+            {
+                Some((_, ty)) => {
+                    let value = tii::encode(ty, &value).map_err(tii::Error::from)?;
+                    Ok((key, value))
+                }
+                None => Ok((key, value)),
+            }
+        })
+        .collect::<Result<_, tii::Error>>()?;
+
+    Ok(ResolveParams {
         tir,
-        args: merged,
+        args: encoded,
         env: None,
-    }
+    })
 }
 
 /// Builder for transaction invocation.
@@ -575,6 +636,7 @@ pub struct TxBuilder {
     trp: trp::Client,
     args: ArgMap,
     parties: HashMap<String, Party>,
+    params: ParamMap,
 }
 
 impl TxBuilder {
@@ -592,12 +654,21 @@ impl TxBuilder {
             trp,
             args: ArgMap::new(),
             parties: HashMap::new(),
+            params: ParamMap::new(),
         }
     }
 
     /// Sets the environment values applied to this transaction.
     pub fn env(mut self, env: EnvMap) -> Self {
         self.env = env;
+        self
+    }
+
+    /// Sets the parameter-type map used to marshal argument values into the
+    /// TRP `TaggedArg` wire form at resolve time. Arguments without a matching
+    /// entry pass through unencoded. See [`Tx3ClientBuilder::with_tx_params`].
+    pub fn params(mut self, params: ParamMap) -> Self {
+        self.params = params;
         self
     }
 
@@ -634,9 +705,10 @@ impl TxBuilder {
             trp,
             args,
             parties,
+            params,
         } = self;
 
-        let resolve_params = build_resolve_params(tir, env, &parties, args);
+        let resolve_params = build_resolve_params(tir, env, &parties, args, &params)?;
 
         let envelope = trp.resolve(resolve_params).await?;
 
@@ -1317,7 +1389,8 @@ mod tests {
         let mut args = ArgMap::new();
         args.insert("quantity".to_string(), serde_json::json!(10_000_000));
 
-        let params = build_resolve_params(sample_tir(), env, &parties, args);
+        let params =
+            build_resolve_params(sample_tir(), env, &parties, args, &ParamMap::new()).unwrap();
 
         assert_eq!(params.env, None);
         assert_eq!(params.tir.content, "abcd");
@@ -1343,7 +1416,9 @@ mod tests {
         let mut args = ArgMap::new();
         args.insert("quantity".to_string(), serde_json::json!(999));
 
-        let params = build_resolve_params(sample_tir(), env, &HashMap::new(), args);
+        let params =
+            build_resolve_params(sample_tir(), env, &HashMap::new(), args, &ParamMap::new())
+                .unwrap();
 
         assert_eq!(
             params.args.get("quantity").unwrap(),
@@ -1361,11 +1436,156 @@ mod tests {
         let mut parties = HashMap::new();
         parties.insert("sender".to_string(), Party::signer(stub));
 
-        let params = build_resolve_params(sample_tir(), EnvMap::new(), &parties, ArgMap::new());
+        let params = build_resolve_params(
+            sample_tir(),
+            EnvMap::new(),
+            &parties,
+            ArgMap::new(),
+            &ParamMap::new(),
+        )
+        .unwrap();
 
         assert_eq!(
             params.args.get("sender").unwrap(),
             &serde_json::json!("addr_signer")
+        );
+    }
+
+    /// Interprets a JSON schema node into a [`ParamType`] the way the SDK reads
+    /// a `.tii` params schema.
+    fn param_of(schema: serde_json::Value) -> crate::tii::ParamType {
+        crate::tii::ParamType::from_json_schema(&schema, &HashMap::new())
+    }
+
+    #[test]
+    fn resolve_params_encode_typed_args_to_tagged_wire_form() {
+        // The facade resolve path (used by both the dynamic client and
+        // codegen-generated bindings) must marshal typed args into the
+        // `TaggedArg` wire form — regression for Hydra `init`
+        // `participants: vec![vec![1, 2]]` reaching the resolver raw and
+        // failing with `(-32005) value is not bytes: [1,2]`.
+        let mut params = ParamMap::new();
+        params.insert(
+            "participants".to_string(),
+            param_of(serde_json::json!({
+                "type": "array",
+                "items": { "$ref": "https://tx3.land/specs/v1beta0/tii#/$defs/Bytes" }
+            })),
+        );
+        params.insert(
+            "head_id".to_string(),
+            param_of(
+                serde_json::json!({ "$ref": "https://tx3.land/specs/v1beta0/tii#/$defs/Bytes" }),
+            ),
+        );
+
+        let mut args = ArgMap::new();
+        args.insert("participants".to_string(), serde_json::json!([[1, 2]]));
+        args.insert("head_id".to_string(), serde_json::json!("abcd0123"));
+
+        let resolve =
+            build_resolve_params(sample_tir(), EnvMap::new(), &HashMap::new(), args, &params)
+                .unwrap();
+
+        assert_eq!(
+            resolve.args.get("participants").unwrap(),
+            &serde_json::json!({ "list": [{ "bytes": "0x0102" }] })
+        );
+        // A top-level scalar stays bare; the resolver coerces it.
+        assert_eq!(
+            resolve.args.get("head_id").unwrap(),
+            &serde_json::json!("abcd0123")
+        );
+    }
+
+    #[test]
+    fn resolve_params_match_param_names_case_insensitively() {
+        // Arg keys are lowercased on set while `.tii` params keep their
+        // original case; the encoder lookup must still find them.
+        let mut params = ParamMap::new();
+        params.insert(
+            "Participants".to_string(),
+            param_of(serde_json::json!({
+                "type": "array",
+                "items": { "type": "integer" }
+            })),
+        );
+
+        let mut args = ArgMap::new();
+        args.insert("participants".to_string(), serde_json::json!([7]));
+
+        let resolve =
+            build_resolve_params(sample_tir(), EnvMap::new(), &HashMap::new(), args, &params)
+                .unwrap();
+
+        assert_eq!(
+            resolve.args.get("participants").unwrap(),
+            &serde_json::json!({ "list": [{ "int": 7 }] })
+        );
+    }
+
+    #[test]
+    fn resolve_params_pass_unmapped_args_through() {
+        let mut args = ArgMap::new();
+        args.insert("mystery".to_string(), serde_json::json!([[1, 2]]));
+
+        let resolve = build_resolve_params(
+            sample_tir(),
+            EnvMap::new(),
+            &HashMap::new(),
+            args,
+            &ParamMap::new(),
+        )
+        .unwrap();
+
+        // No declared type: the value passes through for the resolver to judge.
+        assert_eq!(
+            resolve.args.get("mystery").unwrap(),
+            &serde_json::json!([[1, 2]])
+        );
+    }
+
+    #[test]
+    fn resolve_params_surface_encode_errors_preflight() {
+        let mut params = ParamMap::new();
+        params.insert(
+            "name".to_string(),
+            param_of(
+                serde_json::json!({ "$ref": "https://tx3.land/specs/v1beta0/tii#/$defs/Bytes" }),
+            ),
+        );
+
+        let mut args = ArgMap::new();
+        args.insert("name".to_string(), serde_json::json!(42));
+
+        let result =
+            build_resolve_params(sample_tir(), EnvMap::new(), &HashMap::new(), args, &params);
+
+        assert!(matches!(
+            result,
+            Err(Error::Tii(crate::tii::Error::EncodeArg(_)))
+        ));
+    }
+
+    #[test]
+    fn client_tx_wires_protocol_params_into_builder() {
+        // `Protocol::client()` must thread each transaction's param types into
+        // the facade so `resolve()` encodes typed args — the dynamic-path
+        // equivalent of codegen's `with_tx_params`.
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let tii = format!("{manifest_dir}/tests/fixtures/transfer.tii");
+        let protocol = crate::tii::Protocol::from_file(&tii).unwrap();
+
+        let client = protocol
+            .client()
+            .trp_endpoint("http://localhost:0")
+            .build()
+            .unwrap();
+
+        let builder = client.tx("transfer").unwrap();
+        assert!(
+            !builder.params.is_empty(),
+            "tx builder must receive the protocol's param types"
         );
     }
 }

@@ -5,7 +5,10 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use serde::Serialize;
-use tx3_sdk::core::{ArgMap, TirEncoding, TirEnvelope};
+// `Address` and `UtxoRef` back the params of any transaction that declares
+// them; whether they appear is protocol-dependent, so allow them unused.
+#[allow(unused_imports)]
+use tx3_sdk::core::{Address, ArgMap, TirEncoding, TirEnvelope, UtxoRef};
 use tx3_sdk::trp::ClientOptions;
 use tx3_sdk::{Party, Profile as SdkProfile, Tx3Client, Tx3ClientBuilder, TxBuilder};
 
@@ -54,6 +57,26 @@ pub static {{constantCase @key}}_TIR: LazyLock<TirEnvelope> = LazyLock::new(|| T
     content: "{{tir.content}}".to_string(),
     encoding: TirEncoding::{{pascalCase tir.encoding}},
     version: "{{tir.version}}".to_string(),
+});
+{{/each}}
+
+/// The protocol's `components.schemas` table, embedded verbatim from the TII.
+/// Resolves `#/components/schemas/<Name>` refs inside params schemas.
+static COMPONENT_SCHEMAS: LazyLock<HashMap<String, serde_json::Value>> = LazyLock::new(|| {
+{{#if tii.components.schemas}}
+    serde_json::from_str(r#"{{{json tii.components.schemas}}}"#)
+        .expect("codegen invariant: embedded component schemas parse")
+{{else}}
+    HashMap::new()
+{{/if}}
+});
+
+{{#each tii.transactions}}
+/// Embedded params JSON schema for the `{{@key}}` transaction. Drives
+/// type-directed argument encoding into the TRP wire form at resolve time.
+static {{constantCase @key}}_PARAMS_SCHEMA: LazyLock<serde_json::Value> = LazyLock::new(|| {
+    serde_json::from_str(r#"{{{json params}}}"#)
+        .expect("codegen invariant: embedded params schema parses")
 });
 {{/each}}
 
@@ -110,6 +133,12 @@ impl Client {
 
         let inner = Tx3ClientBuilder::from_parts(transactions, profiles, Default::default())
             .trp(options)
+{{#each tii.transactions}}
+            .with_tx_params(
+                "{{@key}}",
+                tx3_sdk::tii::params_from_schema(&{{constantCase @key}}_PARAMS_SCHEMA, &COMPONENT_SCHEMAS),
+            )
+{{/each}}
 {{#if tii.profiles}}
             .with_profile(profile.name())
 {{/if}}

@@ -4,7 +4,9 @@ version = "{{tii.protocol.version}}"
 edition = "2021"
 
 [dependencies]
-tx3-sdk = { version = "^0.13.0" }
+# Floor: the first release carrying `Tx3ClientBuilder::with_tx_params` and
+# `tx3_sdk::tii::params_from_schema`, which this generated client calls.
+tx3-sdk = { version = "^0.15.0" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 

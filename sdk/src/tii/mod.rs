@@ -79,7 +79,7 @@ mod schema;
 pub mod spec;
 
 pub use encode::{encode, EncodeError};
-pub use schema::{ParamMap, ParamType, VariantCase};
+pub use schema::{params_from_schema, ParamMap, ParamType, VariantCase};
 
 /// Error type for TII operations.
 ///
@@ -273,28 +273,9 @@ impl Protocol {
 
         let mut out = Invocation {
             tir: tx.tir.clone(),
-            params: ParamMap::new(),
+            params: self.params_for(tx),
             args: ArgMap::new(),
         };
-
-        let components: HashMap<String, Value> = self
-            .spec
-            .components
-            .as_ref()
-            .map(|c| c.schemas.clone())
-            .unwrap_or_default();
-
-        for party in self.spec.parties.keys() {
-            out.params.insert(party.to_lowercase(), ParamType::Address);
-        }
-
-        if let Some(env) = &self.spec.environment {
-            out.params
-                .extend(schema::params_from_schema(env, &components));
-        }
-
-        out.params
-            .extend(schema::params_from_schema(&tx.params, &components));
 
         if let Some(profile) = profile {
             if let Some(env) = profile.environment.as_object() {
@@ -308,6 +289,42 @@ impl Protocol {
         }
 
         Ok(out)
+    }
+
+    /// Builds the full parameter-type map a transaction resolves against:
+    /// declared parties (as addresses, lowercased), the protocol environment
+    /// schema, and the transaction's own params schema — the same map
+    /// [`Protocol::invoke`] gives its [`Invocation`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownTx`] if `tx` is not declared by the protocol.
+    pub fn tx_params(&self, tx: &str) -> Result<ParamMap, Error> {
+        let tx = self.ensure_tx(tx)?;
+        Ok(self.params_for(tx))
+    }
+
+    fn params_for(&self, tx: &Transaction) -> ParamMap {
+        let components: HashMap<String, Value> = self
+            .spec
+            .components
+            .as_ref()
+            .map(|c| c.schemas.clone())
+            .unwrap_or_default();
+
+        let mut params = ParamMap::new();
+
+        for party in self.spec.parties.keys() {
+            params.insert(party.to_lowercase(), ParamType::Address);
+        }
+
+        if let Some(env) = &self.spec.environment {
+            params.extend(schema::params_from_schema(env, &components));
+        }
+
+        params.extend(schema::params_from_schema(&tx.params, &components));
+
+        params
     }
 
     /// Returns all transactions defined in the protocol.
