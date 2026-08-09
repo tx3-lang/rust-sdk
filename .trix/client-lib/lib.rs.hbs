@@ -21,7 +21,12 @@ pub const TARGET_TII_VERSION: &str = "{{tii.tii.version}}";
 
 {{#if tii.environment}}
 /// JSON Schema of the protocol environment, embedded verbatim from the TII.
-pub const ENVIRONMENT_SCHEMA: &str = r#"{{{json tii.environment}}}"#;
+//
+// Delimited `r####"…"####`, not `r#"…"#`: an embedded schema contains local
+// refs of the form `"$ref":"#/components/schemas/<Name>"`, and that `"#`
+// closes a single-hash raw string early. Four hashes because no JSON schema
+// plausibly contains `"####`.
+pub const ENVIRONMENT_SCHEMA: &str = r####"{{{json tii.environment}}}"####;
 {{/if}}
 
 {{#if tii.profiles}}
@@ -45,7 +50,7 @@ impl Profile {
 
 {{#each tii.profiles}}
 static {{constantCase @key}}_PROFILE: LazyLock<SdkProfile> = LazyLock::new(|| {
-    serde_json::from_str(r#"{{{json this}}}"#)
+    serde_json::from_str(r####"{{{json this}}}"####)
         .expect("codegen invariant: embedded profile parses")
 });
 {{/each}}
@@ -64,7 +69,7 @@ pub static {{constantCase @key}}_TIR: LazyLock<TirEnvelope> = LazyLock::new(|| T
 /// Resolves `#/components/schemas/<Name>` refs inside params schemas.
 static COMPONENT_SCHEMAS: LazyLock<HashMap<String, serde_json::Value>> = LazyLock::new(|| {
 {{#if tii.components.schemas}}
-    serde_json::from_str(r#"{{{json tii.components.schemas}}}"#)
+    serde_json::from_str(r####"{{{json tii.components.schemas}}}"####)
         .expect("codegen invariant: embedded component schemas parse")
 {{else}}
     HashMap::new()
@@ -75,7 +80,7 @@ static COMPONENT_SCHEMAS: LazyLock<HashMap<String, serde_json::Value>> = LazyLoc
 /// Embedded params JSON schema for the `{{@key}}` transaction. Drives
 /// type-directed argument encoding into the TRP wire form at resolve time.
 static {{constantCase @key}}_PARAMS_SCHEMA: LazyLock<serde_json::Value> = LazyLock::new(|| {
-    serde_json::from_str(r#"{{{json params}}}"#)
+    serde_json::from_str(r####"{{{json params}}}"####)
         .expect("codegen invariant: embedded params schema parses")
 });
 {{/each}}

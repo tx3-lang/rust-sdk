@@ -20,7 +20,8 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 gen="$(mktemp -d)"
-trap 'rm -rf "$gen"' EXIT
+gen_complex="$(mktemp -d)"
+trap 'rm -rf "$gen" "$gen_complex"' EXIT
 
 tx3c codegen \
   --tii "$repo_root/sdk/tests/fixtures/transfer.tii" \
@@ -75,5 +76,35 @@ tx3-sdk = { path = "$repo_root/sdk" }
 EOF
 
 cargo check --manifest-path "$gen/Cargo.toml"
+
+# The transfer fixture is deliberately plain: no custom types, no UtxoRef
+# params. Render `complex.tii` as well, which carries both. It is the only
+# fixture whose embedded schemas contain local `"$ref":"#/components/schemas/…"`
+# refs, and the only one that exercises the `UtxoRef`/`Address` core imports —
+# the two things a transfer-only check cannot see.
+tx3c codegen \
+  --tii "$repo_root/sdk/tests/fixtures/complex.tii" \
+  --template "$repo_root/.trix/client-lib" \
+  --output "$gen_complex"
+
+# Local component refs must survive into the generated source. A raw string
+# delimited `r#"…"#` is closed early by the `"#` in such a ref, which produces
+# a file that parses as garbage rather than one that is merely wrong.
+grep -qF '#/components/schemas/' "$gen_complex/lib.rs" || {
+  echo "generated lib.rs lost its local component refs"
+  exit 1
+}
+grep -qF 'UtxoRef' "$gen_complex/lib.rs" || {
+  echo "generated lib.rs missing the UtxoRef core import"
+  exit 1
+}
+
+cat >> "$gen_complex/Cargo.toml" <<EOF
+
+[patch.crates-io]
+tx3-sdk = { path = "$repo_root/sdk" }
+EOF
+
+cargo check --manifest-path "$gen_complex/Cargo.toml"
 
 echo "codegen check passed"
