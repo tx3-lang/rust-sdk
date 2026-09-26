@@ -85,26 +85,17 @@ static {{constantCase @key}}_PARAMS_SCHEMA: LazyLock<serde_json::Value> = LazyLo
 });
 {{/each}}
 
-{{#if tii.components.schemas}}
-// Named types for the protocol's custom (record / variant) types.
-{{{componentTypes tii.components.schemas "rust"}}}
-{{/if}}
+// Named types for the protocol's custom (record / variant) types and the
+// arguments of each transaction, declared by the renderer.
+{{{declarations tii "rust"~}}}
 {{#each tii.transactions}}
-/// Arguments for the {{@key}} transaction.
-#[derive(Debug, Clone, Serialize)]
-pub struct {{pascalCase @key}}Params {
-{{#each params.properties}}
-    pub {{snakeCase @key}}: {{schemaTypeFor this "rust"}},
-{{/each}}
-}
-
-impl From<{{pascalCase @key}}Params> for ArgMap {
-    fn from(args: {{pascalCase @key}}Params) -> Self {
+impl From<{{paramsTypeName @key "rust"}}> for ArgMap {
+    fn from(args: {{paramsTypeName @key "rust"}}) -> Self {
         let mut map = ArgMap::new();
 {{#each params.properties}}
         map.insert(
             "{{@key}}".to_string(),
-            serde_json::to_value(&args.{{snakeCase @key}}).expect("failed to serialize tx arg"),
+            serde_json::to_value(&args.{{identifier @key "rust" "param"}}).expect("failed to serialize tx arg"),
         );
 {{/each}}
         map
@@ -165,7 +156,7 @@ impl Client {
 {{#each tii.transactions}}
     /// Builds the {{@key}} transaction. Drive the returned builder with
     /// `.resolve().await?` and the rest of the lifecycle chain.
-    pub fn {{snakeCase @key}}(&self, args: {{pascalCase @key}}Params) -> TxBuilder {
+    pub fn {{snakeCase @key}}(&self, args: {{paramsTypeName @key "rust"}}) -> TxBuilder {
         self.0
             .tx("{{@key}}")
             .expect("codegen invariant: tx is declared by the protocol")
