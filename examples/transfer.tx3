@@ -11,9 +11,9 @@ party Middleman;
 tx transfer(
     quantity: Int
 ) {
-    input source {
+    input* source {
         from: Sender,
-        min_amount: Ada(quantity + tax) + fees,
+        min_amount: Ada(quantity + tax) + fees + min_utxo(change),
     }
 
     output {
@@ -26,7 +26,7 @@ tx transfer(
         amount: Ada(tax),
     }
 
-    output {
+    output change {
         to: Sender,
         amount: source - Ada(quantity + tax) - fees,
     }
